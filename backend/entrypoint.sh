@@ -5,7 +5,9 @@ set -euo pipefail
 echo "⏳ waiting for Postgres..."
 python - <<'PY'
 import os, time, psycopg
-url = os.environ.get("DATABASE_URL_SYNC", "")
+# Strip SQLAlchemy's driver suffix — libpq/psycopg wants a plain postgresql:// DSN.
+# (SQLAlchemy + Alembic understand postgresql+psycopg://; a raw psycopg.connect does not.)
+url = os.environ.get("DATABASE_URL_SYNC", "").replace("postgresql+psycopg://", "postgresql://")
 for i in range(30):
     try:
         psycopg.connect(url, connect_timeout=3).close()
