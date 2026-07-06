@@ -22,6 +22,7 @@ def test_openapi_schema_lists_risk_endpoints():
     assert "/api/v1/risk/point" in paths
     assert "/api/v1/routes" in paths
     assert "/api/v1/alerts" in paths
+    assert "/api/v1/reports" in paths
 
 
 def test_risk_point_rejects_out_of_ghana():

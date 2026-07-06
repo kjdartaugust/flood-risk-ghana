@@ -19,8 +19,14 @@ _redis: aioredis.Redis | None = None
 def get_redis() -> aioredis.Redis:
     global _redis
     if _redis is None:
+        # Short timeouts so a missing/unreachable Redis fails open fast (the
+        # cache + rate limiter are best-effort, not on the critical path).
         _redis = aioredis.from_url(
-            settings.redis_url, encoding="utf-8", decode_responses=True
+            settings.redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
         )
     return _redis
 
@@ -36,6 +42,13 @@ async def cache_get(key: str) -> Any | None:
 async def cache_set(key: str, value: Any, ttl: int = 300) -> None:
     try:
         await get_redis().set(key, json.dumps(value, default=str), ex=ttl)
+    except Exception:
+        pass
+
+
+async def cache_del(key: str) -> None:
+    try:
+        await get_redis().delete(key)
     except Exception:
         pass
 

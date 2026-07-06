@@ -100,3 +100,31 @@ class SubscribeResponse(BaseModel):
     route_id: str
     channel: str
     created: bool
+
+
+class FloodReportRequest(BaseModel):
+    lat: float = Field(ge=4.5, le=11.2)
+    lng: float = Field(ge=-3.3, le=1.3)
+    severity: int = Field(default=2, ge=1, le=5)
+    area_name: str | None = Field(default=None, max_length=160)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class FloodReportResponse(BaseModel):
+    id: str
+    lat: float
+    lng: float
+    severity: int
+    area_name: str
+    occurred_on: dt.date
+    created: bool = True
+
+
+class FloodReportFeature(BaseModel):
+    id: str
+    lat: float
+    lng: float
+    severity: int
+    area_name: str
+    occurred_on: dt.date
+    source: str

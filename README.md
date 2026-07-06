@@ -36,7 +36,7 @@ A production flood-risk platform for Ghana. Two combined features:
 | Data      | Supabase Postgres + PostGIS, H3 hex index, Redis         |
 | ML        | scikit-learn (logistic baseline), LightGBM (upgrade)     |
 | ETL       | httpx workers, APScheduler cron (rainfall refresh)       |
-| Infra     | Docker Compose (local), Fly.io / Render (deploy), GH CI  |
+| Infra     | Docker Compose (local); Neon + Render + Vercel (deploy)  |
 
 ## Quick start (local)
 
@@ -95,18 +95,36 @@ OpenAPI docs are served at `/docs` (Swagger) and `/redoc`. Key endpoints:
 | GET    | `/api/v1/risk/area?name=`         | risk for a named area (e.g. Kaneshie)     |
 | GET    | `/api/v1/routes`                  | trotro routes with current flood status   |
 | GET    | `/api/v1/routes/{id}/forecast`    | route flood forecast from rainfall        |
-| GET    | `/api/v1/alerts`                  | active route alerts (auth)                |
+| GET    | `/api/v1/alerts`                  | active route alerts                       |
 | POST   | `/api/v1/alerts/subscribe`        | subscribe a route for push alerts (auth)  |
+| POST   | `/api/v1/reports`                 | crowdsourced flood report (persists)      |
+| GET    | `/api/v1/reports/recent`          | recent flood reports (historical + community) |
 
-## Deployment
+## Live deployment
 
-See [`docs/DEPLOY.md`](docs/DEPLOY.md). Summary:
+The whole platform runs on free tiers (Neon + Render + Vercel).
 
-- **Backend/worker** → Fly.io or Render (Dockerfile). Set env from `.env.example`.
-- **Frontend** → Vercel (`frontend/` root). Set `NEXT_PUBLIC_API_URL`, map keys.
-- **DB** → Supabase project (enable PostGIS: `create extension postgis;`).
-- **Redis** → Upstash / Fly Redis.
-- **ETL cron** → the worker container runs APScheduler; on Render use a cron job.
+| Piece    | Service          | URL                                              |
+|----------|------------------|--------------------------------------------------|
+| Frontend | Vercel           | `https://<your-app>.vercel.app`                  |
+| Backend  | Render (Docker)  | `https://<your-service>.onrender.com/api/v1`     |
+| Database | Neon Postgres    | `<project>.<region>.aws.neon.tech` (host only)   |
+
+> Render's free web service spins down after ~15 min idle; the first request after
+> a nap takes ~30–50 s to cold-start (it re-seeds on boot). Keep-alive pinging is a
+> deliberately separate later step.
+
+### How to redeploy
+
+- **Frontend (Vercel):** push to `main` → Vercel auto-builds `frontend/`. Or run
+  `vercel --prod` from `frontend/`. Env: `NEXT_PUBLIC_API_URL` = backend `/api/v1` URL.
+- **Backend (Render):** push to `main` → Render auto-deploys from `render.yaml`
+  (`autoDeploy: true`), or click **Manual Deploy → Deploy latest commit**. Secrets
+  (`DATABASE_URL`, `DATABASE_URL_SYNC`, `CORS_ORIGINS`, `SUPABASE_JWT_SECRET`) are set
+  once in the dashboard (`sync: false`). Migrations + seed run automatically on boot.
+- **Database (Neon):** no redeploy — persistent. Data survives backend restarts.
+
+Full first-time walkthrough: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## Data sources & licensing
 

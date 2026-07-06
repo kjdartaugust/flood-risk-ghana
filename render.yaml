@@ -1,67 +1,45 @@
-# Render Blueprint — one-click deploy of the full stack.
+# Render Blueprint — FREE-TIER deploy of the FloodWatch backend.
 # https://render.com/docs/blueprint-spec
+#
+# Free-tier notes:
+#   * The API is a free Docker web service (spins down when idle; cold start ~1 min).
+#   * Redis is a free Render Key Value instance; the backend fails open without it.
+#   * The scheduled ETL worker is intentionally omitted — Render background workers
+#     are NOT free, and rainfall scheduling is a separate later step. The API seeds
+#     itself on first boot (entrypoint → alembic upgrade head → seed), so the DB is
+#     populated without the worker.
+#   * The database is Neon (external, free) — set DATABASE_URL / DATABASE_URL_SYNC
+#     in the Render dashboard from your Neon connection string (see docs/DEPLOY.md).
 services:
   - type: web
     name: floodwatch-backend
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
-    region: frankfurt
-    plan: starter
+    region: frankfurt          # closest free region to Ghana
+    plan: free
     healthCheckPath: /api/v1/health
+    autoDeploy: true
     envVars:
       - key: ENV
         value: production
       - key: DATABASE_URL
-        sync: false           # set to your Supabase asyncpg URL
+        sync: false            # postgresql+asyncpg://<user>:<pw>@<neon-host>/<db>
       - key: DATABASE_URL_SYNC
-        sync: false           # set to your Supabase psycopg URL
-      - key: SUPABASE_URL
-        sync: false
+        sync: false            # postgresql+psycopg://<user>:<pw>@<neon-host>/<db>?sslmode=require
+      - key: CORS_ORIGINS
+        sync: false            # https://<your-vercel-app>.vercel.app
       - key: SUPABASE_JWT_SECRET
-        sync: false
+        sync: false            # optional — only needed for authed /alerts/subscribe
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: floodwatch-redis
           property: connectionString
 
-  - type: worker
-    name: floodwatch-worker
-    runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    region: frankfurt
-    plan: starter
-    dockerCommand: python -m app.etl.worker
-    envVars:
-      - key: RUN_SEED
-        value: "false"
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SYNC
-        sync: false
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: floodwatch-redis
-          property: connectionString
-
-  - type: redis
+  - type: keyvalue
     name: floodwatch-redis
     region: frankfurt
-    plan: starter
-    ipAllowList: []
-
-  - type: web
-    name: floodwatch-frontend
-    runtime: docker
-    dockerfilePath: ./frontend/Dockerfile
-    dockerContext: ./frontend
-    region: frankfurt
-    plan: starter
-    envVars:
-      - key: NEXT_PUBLIC_API_URL
-        sync: false           # https://floodwatch-backend.onrender.com/api/v1
-      - key: NEXT_PUBLIC_MAP_STYLE
-        value: https://demotiles.maplibre.org/style.json
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []            # only reachable from within Render

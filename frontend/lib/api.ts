@@ -46,8 +46,30 @@ export interface Alert {
   expires_at: string;
 }
 
+export interface FloodReport {
+  id: string;
+  lat: number;
+  lng: number;
+  severity: number;
+  area_name: string;
+  occurred_on: string;
+  created?: boolean;
+  source?: string;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API}${path}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   return res.json() as Promise<T>;
 }
@@ -63,6 +85,14 @@ export const api = {
     ),
   routes: () => get<RouteSummary[]>(`/routes`),
   alerts: () => get<Alert[]>(`/alerts`),
+  reportFlood: (r: {
+    lat: number;
+    lng: number;
+    severity: number;
+    note?: string;
+  }) => post<FloodReport>(`/reports`, r),
+  recentReports: (limit = 100) =>
+    get<FloodReport[]>(`/reports/recent?limit=${limit}`),
 };
 
 export const BAND_COLOR: Record<Band, string> = {

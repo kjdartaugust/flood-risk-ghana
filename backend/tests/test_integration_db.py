@@ -100,3 +100,25 @@ def test_subscribe_requires_auth():
     r = client.post("/api/v1/alerts/subscribe",
                     json={"route_id": "x", "channel": "web"})
     assert r.status_code == 401
+
+
+def test_flood_report_persists_end_to_end():
+    """The full write path: POST a report → it is stored → GET recent shows it."""
+    before = client.get("/api/v1/reports/recent", params={"limit": 500}).json()
+    payload = {"lat": 5.5610, "lng": -0.2355, "severity": 4,
+               "note": "integration-test report"}
+    created = client.post("/api/v1/reports", json=payload)
+    assert created.status_code == 201
+    body = created.json()
+    assert body["created"] is True
+    new_id = body["id"]
+
+    after = client.get("/api/v1/reports/recent", params={"limit": 500}).json()
+    assert len(after) == len(before) + 1
+    assert any(r["id"] == new_id for r in after)
+    assert any(r["source"] == "community" for r in after)
+
+
+def test_flood_report_rejects_out_of_ghana():
+    r = client.post("/api/v1/reports", json={"lat": 51.5, "lng": -0.12})
+    assert r.status_code == 422

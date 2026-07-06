@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useState } from "react";
+import ReportFlood from "@/components/ReportFlood";
 import RiskPanel from "@/components/RiskPanel";
 import { api, RiskPoint } from "@/lib/api";
 
@@ -53,6 +54,13 @@ export default function Home() {
           </div>
         )}
         <RiskPanel risk={risk} loading={loading} />
+        {risk && (
+          <ReportFlood
+            lat={risk.lat}
+            lng={risk.lng}
+            onReported={() => score(() => api.riskPoint(risk.lat, risk.lng))}
+          />
+        )}
       </aside>
     </div>
   );
