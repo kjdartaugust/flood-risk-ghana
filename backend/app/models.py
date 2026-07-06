@@ -23,7 +23,6 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -38,7 +37,7 @@ class FloodEvent(Base):
 
     __tablename__ = "flood_events"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     occurred_on: Mapped[dt.date] = mapped_column(nullable=False)
     area_name: Mapped[str] = mapped_column(String(160), index=True)
     severity: Mapped[int] = mapped_column(Integer, default=1)  # 1..5
@@ -102,7 +101,7 @@ class TrotroRoute(Base):
 
     __tablename__ = "trotro_routes"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     osm_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200), index=True)
     from_stop: Mapped[str | None] = mapped_column(String(160), nullable=True)
@@ -126,7 +125,7 @@ class RouteAlert(Base):
 
     __tablename__ = "route_alerts"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     route_id: Mapped[str] = mapped_column(ForeignKey("trotro_routes.id"), index=True)
     level: Mapped[str] = mapped_column(String(12))  # watch | warning | severe
     message: Mapped[str] = mapped_column(Text)
@@ -148,7 +147,7 @@ class AlertSubscription(Base):
 
     __tablename__ = "alert_subscriptions"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     route_id: Mapped[str] = mapped_column(ForeignKey("trotro_routes.id"), index=True)
     channel: Mapped[str] = mapped_column(String(20), default="web")  # web | sms | push
