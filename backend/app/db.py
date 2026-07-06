@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
@@ -24,11 +25,16 @@ def _connect_args() -> dict:
     return {} if local else {"ssl": True}
 
 
+# NullPool = one asyncpg connection per session, opened and closed on demand.
+# A pooled QueuePool binds each asyncpg connection to the event loop that created
+# it; anything that drives the app across multiple loops (Starlette's sync
+# TestClient in CI, or a serverless-style restart) then reuses a connection on the
+# wrong loop and raises "attached to a different loop" / "Event loop is closed".
+# NullPool sidesteps that entirely and suits this deployment — a single low-traffic
+# instance on Neon's direct endpoint, with hot reads served from Redis.
 engine = create_async_engine(
     settings.database_url,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
+    poolclass=NullPool,
     echo=False,
     connect_args=_connect_args(),
 )
