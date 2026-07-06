@@ -1,0 +1,27 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+psycopg[binary]==3.2.3
+alembic==1.14.0
+geoalchemy2==0.16.0
+shapely==2.0.6
+h3==4.1.2
+redis==5.2.1
+httpx==0.28.1
+python-jose[cryptography]==3.3.0
+apscheduler==3.11.0
+numpy==2.2.1
+pandas==2.2.3
+scikit-learn==1.6.0
+lightgbm==4.5.0
+joblib==1.4.2
+tenacity==9.0.0
+python-multipart==0.0.20
+# dev / test
+pytest==8.3.4
+pytest-asyncio==0.25.0
+respx==0.22.0
+ruff==0.8.4

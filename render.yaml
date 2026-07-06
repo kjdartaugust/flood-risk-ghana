@@ -1,0 +1,67 @@
+# Render Blueprint — one-click deploy of the full stack.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: floodwatch-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: frankfurt
+    plan: starter
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false           # set to your Supabase asyncpg URL
+      - key: DATABASE_URL_SYNC
+        sync: false           # set to your Supabase psycopg URL
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: floodwatch-redis
+          property: connectionString
+
+  - type: worker
+    name: floodwatch-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: frankfurt
+    plan: starter
+    dockerCommand: python -m app.etl.worker
+    envVars:
+      - key: RUN_SEED
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SYNC
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: floodwatch-redis
+          property: connectionString
+
+  - type: redis
+    name: floodwatch-redis
+    region: frankfurt
+    plan: starter
+    ipAllowList: []
+
+  - type: web
+    name: floodwatch-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    region: frankfurt
+    plan: starter
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        sync: false           # https://floodwatch-backend.onrender.com/api/v1
+      - key: NEXT_PUBLIC_MAP_STYLE
+        value: https://demotiles.maplibre.org/style.json

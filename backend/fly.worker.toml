@@ -1,0 +1,18 @@
+# Fly.io deployment for the FloodWatch ETL worker (rainfall refresh + alerts).
+# fly launch --config fly.worker.toml --no-deploy ; then `fly deploy --config fly.worker.toml`
+app = "floodwatch-worker"
+primary_region = "jnb"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ENV = "production"
+  RUN_SEED = "false"
+
+[processes]
+  worker = "python -m app.etl.worker"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

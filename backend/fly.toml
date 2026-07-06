@@ -1,0 +1,32 @@
+# Fly.io deployment for the FloodWatch backend API.
+# Deploy: fly launch --no-deploy  (once), then `fly deploy`.
+# Set secrets: fly secrets set DATABASE_URL=... DATABASE_URL_SYNC=... \
+#   REDIS_URL=... SUPABASE_JWT_SECRET=... SUPABASE_URL=...
+
+app = "floodwatch-backend"
+primary_region = "jnb"   # Johannesburg — closest Fly region to Ghana
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ENV = "production"
+  PORT = "8000"
+  API_V1_PREFIX = "/api/v1"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.checks]
+    [[http_service.checks]]
+      path = "/api/v1/health"
+      interval = "30s"
+      timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -1,0 +1,73 @@
+name: floodwatch-ghana
+
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: floodwatch
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d floodwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    depends_on:
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgis:5432/floodwatch
+      DATABASE_URL_SYNC: postgresql+psycopg://postgres:postgres@postgis:5432/floodwatch
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:3000
+      ENV: development
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: ./backend
+    depends_on:
+      backend:
+        condition: service_started
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgis:5432/floodwatch
+      DATABASE_URL_SYNC: postgresql+psycopg://postgres:postgres@postgis:5432/floodwatch
+      REDIS_URL: redis://redis:6379/0
+      RUN_SEED: "false"
+    command: python -m app.etl.worker
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NEXT_PUBLIC_MAP_STYLE: https://demotiles.maplibre.org/style.json
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
