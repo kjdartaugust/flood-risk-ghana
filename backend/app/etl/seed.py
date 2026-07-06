@@ -17,7 +17,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.etl.osm_routes import ingest_routes
 from app.etl.terrain import build_tiles
-from app.models import FloodEvent
+from app.models import FloodEvent, RiskTile, TrotroRoute
 from app.services.geo import ACCRA_HOTSPOTS
 
 logging.basicConfig(level=logging.INFO)
@@ -54,13 +54,27 @@ async def seed_flood_events() -> int:
         return len(HISTORICAL)
 
 
+async def _count(model) -> int:
+    async with SessionLocal() as db:
+        return (await db.execute(select(func.count()).select_from(model))).scalar() or 0
+
+
 async def main() -> None:
     await seed_flood_events()
-    async with SessionLocal() as db:
-        # Populate the risk grid first so routes can compute baseline risk.
-        await build_tiles(db, settings.h3_resolution)
-    async with SessionLocal() as db:
-        await ingest_routes(db, use_overpass=False)
+    # Skip the expensive rebuilds when already populated — this runs on every
+    # (free-tier) cold start, and re-tiling 1000+ cells adds ~30s to first-request
+    # latency for no benefit. A fresh DB (counts == 0) still seeds fully.
+    if await _count(RiskTile) == 0:
+        async with SessionLocal() as db:
+            # Populate the risk grid first so routes can compute baseline risk.
+            await build_tiles(db, settings.h3_resolution)
+    else:
+        log.info("risk_tiles already populated — skipping build_tiles")
+    if await _count(TrotroRoute) == 0:
+        async with SessionLocal() as db:
+            await ingest_routes(db, use_overpass=False)
+    else:
+        log.info("trotro_routes already populated — skipping ingest_routes")
     log.info("seed complete")
 
 

@@ -104,11 +104,14 @@ OpenAPI docs are served at `/docs` (Swagger) and `/redoc`. Key endpoints:
 
 The whole platform runs on free tiers (Neon + Render + Vercel).
 
-| Piece    | Service          | URL                                              |
-|----------|------------------|--------------------------------------------------|
-| Frontend | Vercel           | `https://<your-app>.vercel.app`                  |
-| Backend  | Render (Docker)  | `https://<your-service>.onrender.com/api/v1`     |
-| Database | Neon Postgres    | `<project>.<region>.aws.neon.tech` (host only)   |
+| Piece    | Service          | URL                                                       |
+|----------|------------------|-----------------------------------------------------------|
+| Frontend | Vercel           | https://floodwatch-ghana-ten.vercel.app                   |
+| Backend  | Render (Docker)  | https://floodwatch-backend-dlni.onrender.com/api/v1       |
+| Database | Neon Postgres    | `ep-ancient-scene-atrq12o7.c-9.us-east-1.aws.neon.tech`   |
+
+> The exact URLs above are one live instance; anyone redeploying from this repo
+> gets their own Vercel/Render/Neon URLs (fill in your own).
 
 > Render's free web service spins down after ~15 min idle; the first request after
 > a nap takes ~30–50 s to cold-start (it re-seeds on boot). Keep-alive pinging is a
