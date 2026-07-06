@@ -119,8 +119,9 @@ The whole platform runs on free tiers (Neon + Render + Vercel).
 
 ### How to redeploy
 
-- **Frontend (Vercel):** push to `main` → Vercel auto-builds `frontend/`. Or run
-  `vercel --prod` from `frontend/`. Env: `NEXT_PUBLIC_API_URL` = backend `/api/v1` URL.
+- **Frontend (Vercel):** the repo is Git-connected with **Root Directory = `frontend`**,
+  so a push to `main` auto-builds and deploys to production. Or run `vercel --prod`
+  from `frontend/`. Env: `NEXT_PUBLIC_API_URL` = backend `/api/v1` URL.
 - **Backend (Render):** push to `main` → Render auto-deploys from `render.yaml`
   (`autoDeploy: true`), or click **Manual Deploy → Deploy latest commit**. Secrets
   (`DATABASE_URL`, `DATABASE_URL_SYNC`, `CORS_ORIGINS`, `SUPABASE_JWT_SECRET`) are set
