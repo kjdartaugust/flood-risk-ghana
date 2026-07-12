@@ -20,6 +20,7 @@ import math
 import os
 from functools import lru_cache
 
+from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -117,8 +118,19 @@ async def build_tiles(db: AsyncSession, res: int,
     # and zero height above drainage, so scoring them yields a confident "extreme
     # risk" reading over the Gulf of Guinea. Cells with no terrain row at all are
     # kept and proxied.
-    cells = [c for c in cells_in_bbox(*bbox, res)
-             if terrain.get(c, {}).get("is_land", True)]
+    in_bbox = cells_in_bbox(*bbox, res)
+    cells = [c for c in in_bbox if terrain.get(c, {}).get("is_land", True)]
+
+    # Skipping water isn't enough: an earlier build wrote tiles for these cells,
+    # and an upsert never removes a row. Drop them, or the ocean keeps its stale
+    # scores on the map forever.
+    water = [c for c in in_bbox if c not in set(cells)]
+    if water:
+        deleted = (await db.execute(
+            delete(RiskTile).where(RiskTile.h3_index.in_(water))
+        )).rowcount
+        log.info("dropped %d water tiles (of %d masked cells)", deleted, len(water))
+
     density = await historical_density(db, cells, res)
     log.info("building %d land tiles at res %d", len(cells), res)
     n = 0

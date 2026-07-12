@@ -132,13 +132,46 @@ Full first-time walkthrough: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## Data sources & licensing
 
-| Source                | Use                          | License              |
-|-----------------------|------------------------------|----------------------|
-| NASA GPM/IMERG        | rainfall time-series/forecast| NASA open            |
-| Copernicus / SRTM DEM | elevation, slope, drainage   | open                 |
-| Sentinel-2 land cover | impervious surface           | Copernicus open      |
-| OpenStreetMap         | roads + trotro routes        | ODbL                 |
-| Ghana Meteo / NADMO   | historical floods, warnings  | where available      |
+Everything below is live in the code — no keys, no paid tiers.
+
+| Source                                     | Use                                          | License         |
+|--------------------------------------------|----------------------------------------------|-----------------|
+| Copernicus DEM GLO-90 (via Open-Meteo)     | elevation → slope, and HAND                  | Copernicus open |
+| OpenStreetMap (Overpass)                   | waterways → drainage; buildings → imperviousness; trotro routes | ODbL |
+| OpenStreetMap (Nominatim)                  | geocoding flood-incident communities         | ODbL            |
+| Open-Meteo forecast API                    | observed + forecast rainfall                 | open, key-free  |
+| Public reporting, 3 June 2015 Accra flood  | flood-incident labels                        | compiled        |
+
+**Read [`docs/DATA.md`](docs/DATA.md) before you trust a number on this map.** It
+documents how each feature is derived, why 295 grid cells are masked out as open
+water, why `hist_flood_density` is barred from the fitted model as target
+leakage, and the honest spatially-blocked validation scores:
+
+| Model | Spatially-blocked CV AUC |
+|---|---|
+| Weighted baseline (hand-set priors) | 0.547 |
+| Logistic regression | **0.610** |
+| LightGBM | 0.624 |
+
+These are modest, and that is the point — the labels are a compilation from
+public reporting, not a flood registry, and the doc says exactly where that
+breaks down.
+
+## Scheduled refresh
+
+Render's free plan has no background workers, so the rainfall + route-alert cycle
+runs as an external cron: [`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)
+POSTs to `/api/v1/internal/refresh` every 3 hours.
+
+To enable it, set the same secret in both places:
+
+- **Render** → Environment → `CRON_SECRET` = *(any long random string)*
+- **GitHub** → Settings → Secrets and variables → Actions:
+  - `CRON_SECRET` — the same value
+  - `BACKEND_URL` — `https://floodwatch-backend-dlni.onrender.com`
+
+Without `CRON_SECRET` the endpoint fails closed (503) rather than sitting open.
+Trigger a run by hand from the Actions tab (**refresh → Run workflow**).
 
 ## Disclaimer
 
