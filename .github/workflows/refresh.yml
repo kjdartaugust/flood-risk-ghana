@@ -1,0 +1,37 @@
+# Scheduled ETL for the free tier.
+#
+# Render's free plan has no background workers, so `app.etl.worker` (APScheduler)
+# is never deployed and the rainfall/alert cycle never runs in production. This
+# workflow is the substitute: GitHub Actions cron is free, and it calls a
+# token-protected endpoint on the web service to do the work.
+#
+# This is NOT an uptime pinger. It runs every 3 hours to refresh forecast
+# rainfall and re-evaluate route flood alerts — the service is free to sleep in
+# between, and the first call after a sleep just eats the cold start.
+#
+# Required repository secrets:
+#   BACKEND_URL  e.g. https://floodwatch-backend-dlni.onrender.com
+#   CRON_SECRET  must match CRON_SECRET in the Render environment
+name: refresh
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch: # lets you trigger a refresh by hand from the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger rainfall + alert refresh
+        run: |
+          # Render's free instance spins down after ~15 min idle and takes ~50s
+          # to wake. --max-time covers the cold start; the refresh itself runs
+          # as a background task, so the endpoint answers 202 straight away.
+          code=$(curl -sS -o /tmp/out.txt -w '%{http_code}' \
+            --max-time 120 --retry 2 --retry-connrefused \
+            -X POST "${{ secrets.BACKEND_URL }}/api/v1/internal/refresh" \
+            -H "X-Cron-Key: ${{ secrets.CRON_SECRET }}")
+          echo "HTTP $code"; cat /tmp/out.txt; echo
+          # 202 = accepted. Anything else is a real failure worth a red X.
+          test "$code" = "202"

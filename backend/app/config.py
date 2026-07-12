@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     rainfall_refresh_cron: str = Field(
         default="*/30 * * * *", alias="RAINFALL_REFRESH_CRON"
     )
+    # Shared secret for POST /internal/refresh. Render's free tier has no
+    # background workers, so the scheduled ETL runs as an external cron (GitHub
+    # Actions) calling that endpoint. Empty ⇒ endpoint disabled.
+    cron_secret: str = Field(default="", alias="CRON_SECRET")
 
     model_path: str = Field(
         default="app/ml/artifacts/flood_model.pkl", alias="MODEL_PATH"

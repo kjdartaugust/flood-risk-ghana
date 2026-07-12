@@ -21,22 +21,62 @@ from app.models import RainfallObs, RiskTile
 log = logging.getLogger("etl.rainfall")
 
 
-async def _fetch_openmeteo(client: httpx.AsyncClient, lat: float, lng: float) -> dict:
+# Open-Meteo takes comma-separated coordinates and returns one result object per
+# point. Batching turns a 400-tile refresh from 400 sequential HTTP calls into 4
+# — which is the difference between a scheduled job that survives on a free
+# instance and one that doesn't.
+BATCH = 100
+
+
+async def _fetch_openmeteo(
+    client: httpx.AsyncClient, points: list[tuple[float, float]]
+) -> list[dict]:
+    """Hourly precipitation for a batch of (lat, lng), in order."""
     r = await client.get(
         f"{settings.openmeteo_base}/forecast",
         params={
-            "latitude": lat, "longitude": lng,
+            "latitude": ",".join(f"{lat:.5f}" for lat, _ in points),
+            "longitude": ",".join(f"{lng:.5f}" for _, lng in points),
             "hourly": "precipitation",
             "past_days": 1, "forecast_days": 1, "timezone": "UTC",
         },
-        timeout=20,
+        timeout=60,
     )
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    # A single-point request returns an object; a batch returns a list.
+    return data if isinstance(data, list) else [data]
+
+
+async def _apply(db: AsyncSession, tile: RiskTile, data: dict,
+                 now: dt.datetime) -> int:
+    """Upsert one tile's hourly series and refresh its recent-rainfall feature."""
+    hourly = data.get("hourly", {})
+    times = hourly.get("time", [])
+    precip = hourly.get("precipitation", [])
+    rows = 0
+    for ts, mm in zip(times, precip, strict=False):
+        observed_at = dt.datetime.fromisoformat(ts).replace(tzinfo=dt.UTC)
+        stmt = insert(RainfallObs).values(
+            h3_index=tile.h3_index, observed_at=observed_at,
+            horizon="forecast" if observed_at > now else "obs",
+            precip_mm=float(mm or 0.0), source="open-meteo",
+        ).on_conflict_do_update(
+            constraint="uq_rain_cell_ts",
+            set_={"precip_mm": float(mm or 0.0)},
+        )
+        await db.execute(stmt)
+        rows += 1
+    # keep the tile's recent-rainfall feature warm
+    tile.rainfall_recent_mm = round(sum(
+        float(m or 0) for t, m in zip(times, precip, strict=False)
+        if dt.datetime.fromisoformat(t).replace(tzinfo=dt.UTC) <= now
+    ), 2)
+    return rows
 
 
 async def refresh_rainfall(db: AsyncSession, limit_tiles: int = 400) -> int:
-    """Refresh rainfall for the most-populated tiles. Returns rows upserted."""
+    """Refresh rainfall for the highest-risk tiles. Returns rows upserted."""
     tiles = (await db.execute(
         select(RiskTile).order_by(RiskTile.risk_score.desc()).limit(limit_tiles)
     )).scalars().all()
@@ -47,35 +87,17 @@ async def refresh_rainfall(db: AsyncSession, limit_tiles: int = 400) -> int:
     now = dt.datetime.now(dt.UTC)
     rows = 0
     async with httpx.AsyncClient() as client:
-        for tile in tiles:
+        for i in range(0, len(tiles), BATCH):
+            chunk = tiles[i : i + BATCH]
             try:
-                data = await _fetch_openmeteo(client, tile.centroid_lat,
-                                              tile.centroid_lng)
-            except Exception as e:  # noqa: BLE001
-                log.warning("rain fetch failed %s: %s", tile.h3_index, e)
-                continue
-            hourly = data.get("hourly", {})
-            times = hourly.get("time", [])
-            precip = hourly.get("precipitation", [])
-            for ts, mm in zip(times, precip, strict=False):
-                observed_at = dt.datetime.fromisoformat(ts).replace(
-                    tzinfo=dt.UTC)
-                horizon = "forecast" if observed_at > now else "obs"
-                stmt = insert(RainfallObs).values(
-                    h3_index=tile.h3_index, observed_at=observed_at,
-                    horizon=horizon, precip_mm=float(mm or 0.0),
-                    source="open-meteo",
-                ).on_conflict_do_update(
-                    constraint="uq_rain_cell_ts",
-                    set_={"precip_mm": float(mm or 0.0)},
+                results = await _fetch_openmeteo(
+                    client, [(t.centroid_lat, t.centroid_lng) for t in chunk]
                 )
-                await db.execute(stmt)
-                rows += 1
-            # keep the tile's recent-rainfall feature warm
-            recent = sum(float(m or 0) for t, m in zip(times, precip, strict=False)
-                         if dt.datetime.fromisoformat(t).replace(
-                             tzinfo=dt.UTC) <= now)
-            tile.rainfall_recent_mm = round(recent, 2)
+            except Exception as e:  # noqa: BLE001
+                log.warning("rain fetch failed for batch at %d: %s", i, e)
+                continue
+            for tile, data in zip(chunk, results, strict=False):
+                rows += await _apply(db, tile, data, now)
         await db.commit()
     log.info("rainfall refresh: %d rows across %d tiles", rows, len(tiles))
     return rows

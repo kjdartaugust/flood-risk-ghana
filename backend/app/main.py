@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.routes import alerts, health, reports, risk, routes_ep
+from app.api.routes import alerts, health, internal, reports, risk, routes_ep
 from app.config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_ep.router, prefix=p)
     app.include_router(alerts.router, prefix=p)
     app.include_router(reports.router, prefix=p)
+    app.include_router(internal.router, prefix=p)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:

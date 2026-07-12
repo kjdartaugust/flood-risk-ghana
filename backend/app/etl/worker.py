@@ -13,21 +13,11 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from app.api.routes.internal import refresh_cycle
 from app.config import settings
-from app.db import SessionLocal
-from app.etl.rainfall import refresh_rainfall
-from app.services.alerts_service import evaluate_and_raise_alerts
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("worker")
-
-
-async def refresh_cycle() -> None:
-    async with SessionLocal() as db:
-        rows = await refresh_rainfall(db)
-    async with SessionLocal() as db:
-        raised = await evaluate_and_raise_alerts(db)
-    log.info("cycle done: %d rainfall rows, %d alerts raised", rows, raised)
 
 
 def _run_once() -> None:
