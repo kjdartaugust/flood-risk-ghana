@@ -1,7 +1,8 @@
 // Typed client for the FloodWatch API.
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
-export type Band = "low" | "moderate" | "high" | "severe" | "extreme";
+// "none" is open water (sea/lagoon) — not a low score, an undefined question.
+export type Band = "none" | "low" | "moderate" | "high" | "severe" | "extreme";
 
 export interface RiskPoint {
   lat: number;
@@ -96,6 +97,7 @@ export const api = {
 };
 
 export const BAND_COLOR: Record<Band, string> = {
+  none: "#64748b",
   low: "#2dc937",
   moderate: "#a8c700",
   high: "#e7b416",

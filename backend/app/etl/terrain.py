@@ -85,6 +85,17 @@ def _proxy_features(lat: float, lng: float) -> dict[str, float]:
     }
 
 
+def is_open_water(lat: float, lng: float, res: int) -> bool:
+    """True if this cell is masked sea/lagoon surface.
+
+    Open water reads as the ideal flood cell to any terrain index — 0 m, flat,
+    0 m above drainage — so without this check the scorer confidently advises
+    someone standing in the Gulf of Guinea to 'check drainage'.
+    """
+    row = load_terrain().get(latlng_to_cell(lat, lng, res))
+    return row is not None and not row["is_land"]
+
+
 def terrain_for(lat: float, lng: float, res: int) -> tuple[dict[str, float], bool]:
     """Return (features, measured) for a point — measured=False means proxied."""
     cell = latlng_to_cell(lat, lng, res)

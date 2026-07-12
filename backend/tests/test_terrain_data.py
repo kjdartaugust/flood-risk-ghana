@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import csv
 
-from app.etl.terrain import TERRAIN_CSV, load_terrain, terrain_for
+from app.etl.terrain import TERRAIN_CSV, is_open_water, load_terrain, terrain_for
 from app.ml.features import FEATURE_ORDER, MODEL_FEATURE_ORDER, TileFeatures
 from app.services.hazard import density_at
 
@@ -72,6 +72,14 @@ def test_density_falls_off_with_distance():
     assert on_top > nearby > far
     assert far < 0.01
     assert density_at(5.57, -0.20, []) == 0.0
+
+
+def test_open_water_is_recognised_by_the_scorer():
+    """Deleting the ocean's tiles isn't enough — with no tile, a point query
+    falls through to on-the-fly synthesis, which happily called the Gulf of
+    Guinea 'moderate risk, check your drainage'."""
+    assert is_open_water(5.5061, -0.1026, 8) is True   # offshore
+    assert is_open_water(5.5710, -0.2050, 8) is False  # Circle
 
 
 def test_measured_cells_report_as_measured():

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import cache_get, cache_set
 from app.config import settings
+from app.etl.terrain import is_open_water
 from app.ml.features import TileFeatures, advice, band
 from app.ml.model import get_model
 from app.models import RiskTile
@@ -74,12 +75,34 @@ async def _synthesize_features(db: AsyncSession, lat: float, lng: float,
     )
 
 
+def _open_water_response(lat: float, lng: float, h3_index: str,
+                         res: int) -> RiskPointResponse:
+    """Flood risk is not a defined question at sea. Say so, don't score it."""
+    return RiskPointResponse(
+        lat=lat, lng=lng, h3_index=h3_index, resolution=res,
+        risk_score=0.0, band="none", confidence=1.0,
+        components=RiskComponents(
+            elevation=0.0, slope=0.0, drainage=0.0, imperviousness=0.0,
+            historical_flood_density=0.0, recent_rainfall_mm=0.0,
+        ),
+        model_version=get_model().version,
+        nearest_hotspot=None,
+        advice=("Open water (sea or lagoon) — flood risk is not defined here. "
+                "Pick a location on land."),
+    )
+
+
 async def score_point(db: AsyncSession, lat: float, lng: float) -> RiskPointResponse:
     res = settings.h3_resolution
     h3_index = latlng_to_cell(lat, lng, res)
     cache_key = f"risk:point:{h3_index}"
     if (cached := await cache_get(cache_key)) is not None:
         return RiskPointResponse(**cached)
+
+    if is_open_water(lat, lng, res):
+        resp = _open_water_response(lat, lng, h3_index, res)
+        await cache_set(cache_key, resp.model_dump(), ttl=300)
+        return resp
 
     model = get_model()
     tile = await db.get(RiskTile, h3_index)
