@@ -15,11 +15,10 @@ from shapely.geometry import LineString
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.etl.osm_terrain import OVERPASS, UA
 from app.models import TrotroRoute
 
 log = logging.getLogger("etl.osm")
-
-OVERPASS = "https://overpass-api.de/api/interpreter"
 
 # Fallback corridors: (name, from, to, [(lat,lng)...])
 SEED_ROUTES = [
@@ -71,7 +70,10 @@ async def _fetch_overpass(client: httpx.AsyncClient) -> list:
     relation["route"~"bus|minibus|share_taxi"](area.a);
     out geom;
     """
-    r = await client.post(OVERPASS, data={"data": q}, timeout=70)
+    # Without an identifying UA, Overpass's Apache front end answers 406 and we
+    # silently fall through to SEED_ROUTES — which looked like "Overpass is
+    # flaky" for a long time. OSM's usage policy requires a real UA anyway.
+    r = await client.post(OVERPASS, data={"data": q}, headers=UA, timeout=70)
     r.raise_for_status()
     return r.json().get("elements", [])
 

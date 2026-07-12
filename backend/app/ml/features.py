@@ -18,6 +18,15 @@ FEATURE_ORDER = [
     "rainfall_recent_norm",
 ]
 
+# What a *fitted* model is allowed to see. `hist_flood_density` is a kernel over
+# the recorded flood incidents — the very records any label set is built from —
+# so feeding it to a classifier is target leakage: the model would score high
+# wherever we already know it flooded, and validate beautifully against itself.
+# It stays in FEATURE_ORDER because the transparent baseline is a hand-specified
+# index, not something fitted to those labels, and there "we have seen this flood
+# before" is legitimate evidence.
+MODEL_FEATURE_ORDER = [f for f in FEATURE_ORDER if f != "hist_flood_density"]
+
 
 @dataclass
 class TileFeatures:
@@ -33,10 +42,20 @@ class TileFeatures:
         # 0 mm → 0, ~80 mm (heavy Accra downpour) → ~1, saturating.
         return min(self.rainfall_recent_mm / 80.0, 1.0)
 
-    def vector(self) -> list[float]:
+    def _as_dict(self) -> dict[str, float]:
         d = asdict(self)
         d["rainfall_recent_norm"] = self.rainfall_recent_norm
+        return d
+
+    def vector(self) -> list[float]:
+        """Full feature vector, in FEATURE_ORDER — for the weighted baseline."""
+        d = self._as_dict()
         return [float(d[k]) for k in FEATURE_ORDER]
+
+    def model_vector(self) -> list[float]:
+        """Leakage-free vector, in MODEL_FEATURE_ORDER — for a fitted model."""
+        d = self._as_dict()
+        return [float(d[k]) for k in MODEL_FEATURE_ORDER]
 
 
 # Weights for the transparent baseline score (must sum to 1.0). Chosen from

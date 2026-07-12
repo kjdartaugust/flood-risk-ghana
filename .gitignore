@@ -32,3 +32,7 @@ data/interim/
 .DS_Store
 .vscode/
 .idea/
+
+# ETL intermediate caches (regenerate with: python -m app.etl.build_terrain)
+backend/data/.elevation_cache.json
+backend/data/.accra_places.json

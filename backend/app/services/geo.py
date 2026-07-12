@@ -10,6 +10,9 @@ import h3
 # Bounding box of Ghana (roughly) — used to constrain tile generation.
 GHANA_BBOX = (-3.26, 4.71, 1.20, 11.17)  # min_lng, min_lat, max_lng, max_lat
 
+# Greater Accra — the dense study area we build risk tiles and terrain for.
+ACCRA_BBOX = (-0.35, 5.50, -0.05, 5.70)
+
 # Known Accra flood hotspots (lat, lng). Used as priors + for "nearest hotspot".
 ACCRA_HOTSPOTS: dict[str, tuple[float, float]] = {
     "Kaneshie": (5.5620, -0.2360),

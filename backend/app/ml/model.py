@@ -31,7 +31,7 @@ class RiskModel:
             # Confidence from how far the score sits from the decision midpoint.
             conf = 0.55 + 0.35 * abs(score - 50) / 50
             return score, round(conf, 3)
-        proba = float(self._pipeline.predict_proba([f.vector()])[0][1])
+        proba = float(self._pipeline.predict_proba([f.model_vector()])[0][1])
         score = round(proba * 100, 1)
         conf = round(0.6 + 0.4 * abs(proba - 0.5) * 2, 3)
         return score, conf
