@@ -152,6 +152,11 @@ class AlertSubscription(Base):
     route_id: Mapped[str] = mapped_column(ForeignKey("trotro_routes.id"), index=True)
     channel: Mapped[str] = mapped_column(String(20), default="web")  # web | sms | push
     contact: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # The browser-minted Web Push subscription for channel="push": an endpoint
+    # URL plus the p256dh/auth keys used to encrypt to it. Too big and too
+    # structured for `contact`, and browsers rotate it, so it's re-upserted on
+    # every subscribe rather than treated as immutable.
+    push_subscription: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

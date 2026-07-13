@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -89,10 +89,36 @@ class AlertResponse(BaseModel):
     expires_at: dt.datetime
 
 
+class PushSubscription(BaseModel):
+    """What `PushManager.subscribe()` hands back in the browser, passed through.
+
+    We never mint this — the browser does, against its own push service — so
+    the shape is theirs, not ours.
+    """
+
+    endpoint: str = Field(min_length=1)
+    keys: dict[str, str]
+
+    @field_validator("keys")
+    @classmethod
+    def _has_encryption_keys(cls, v: dict[str, str]) -> dict[str, str]:
+        missing = {"p256dh", "auth"} - v.keys()
+        if missing:
+            raise ValueError(f"push keys missing: {', '.join(sorted(missing))}")
+        return v
+
+
 class SubscribeRequest(BaseModel):
     route_id: str
     channel: str = Field(default="web", pattern="^(web|sms|push)$")
     contact: str | None = None
+    push_subscription: PushSubscription | None = None
+
+    @model_validator(mode="after")
+    def _push_needs_a_handle(self) -> SubscribeRequest:
+        if self.channel == "push" and self.push_subscription is None:
+            raise ValueError("channel 'push' requires a push_subscription")
+        return self
 
 
 class SubscribeResponse(BaseModel):
@@ -100,6 +126,17 @@ class SubscribeResponse(BaseModel):
     route_id: str
     channel: str
     created: bool
+    # False when the server has no VAPID keys: the subscription is stored and
+    # the alert will still be raised, but nothing will be pushed to the device.
+    # The UI needs to know that so it doesn't promise a notification it can't
+    # send.
+    delivers: bool = True
+
+
+class VapidKeyResponse(BaseModel):
+    """The public half of the VAPID pair — the browser needs it to subscribe."""
+
+    public_key: str
 
 
 class FloodReportRequest(BaseModel):

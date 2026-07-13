@@ -53,6 +53,18 @@ class Settings(BaseSettings):
     # Actions) calling that endpoint. Empty ⇒ endpoint disabled.
     cron_secret: str = Field(default="", alias="CRON_SECRET")
 
+    # Web Push (VAPID). Mint a pair with `python -m app.services.push`. Empty ⇒
+    # push delivery is disabled and alerts are logged instead (dev/CI default).
+    vapid_public_key: str = Field(default="", alias="VAPID_PUBLIC_KEY")
+    vapid_private_key: str = Field(default="", alias="VAPID_PRIVATE_KEY")
+    # Push services require a contactable `sub` claim in the VAPID JWT so they
+    # can reach the sender about a misbehaving endpoint.
+    vapid_subject: str = Field(default="mailto:ops@floodwatch.gh",
+                               alias="VAPID_SUBJECT")
+    # How long a push service should hold an undelivered alert for. A flood
+    # warning 6h stale is noise, and that's when the alert expires anyway.
+    push_ttl_seconds: int = Field(default=6 * 3600, alias="PUSH_TTL_SECONDS")
+
     model_path: str = Field(
         default="app/ml/artifacts/flood_model.pkl", alias="MODEL_PATH"
     )

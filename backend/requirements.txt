@@ -19,6 +19,7 @@ scikit-learn==1.6.0
 lightgbm==4.5.0
 joblib==1.4.2
 tenacity==9.0.0
+pywebpush==2.3.0
 python-multipart==0.0.20
 # dev / test
 pytest==8.3.4
