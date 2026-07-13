@@ -9,7 +9,8 @@
 # rainfall and re-evaluate route flood alerts — the service is free to sleep in
 # between, and the first call after a sleep just eats the cold start.
 #
-# Required repository secrets:
+# Repository secrets (both required to actually run; if either is missing the
+# job skips quietly rather than failing — route alerts are simply off):
 #   BACKEND_URL  e.g. https://floodwatch-backend-dlni.onrender.com
 #   CRON_SECRET  must match CRON_SECRET in the Render environment
 name: refresh
@@ -24,14 +25,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger rainfall + alert refresh
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
+          # Not configured yet? Skip quietly. A scheduled job that fails because
+          # a feature was never switched on emails the repo owner every time it
+          # fires — 8 nags a day that say nothing except "you haven't set this
+          # up". Silence is the correct signal for "off"; red is for "broken".
+          if [ -z "$BACKEND_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::BACKEND_URL / CRON_SECRET not set — skipping refresh."
+            echo "Set both as repository secrets to switch route alerts on (see README)."
+            exit 0
+          fi
+
           # Render's free instance spins down after ~15 min idle and takes ~50s
           # to wake. --max-time covers the cold start; the refresh itself runs
           # as a background task, so the endpoint answers 202 straight away.
           code=$(curl -sS -o /tmp/out.txt -w '%{http_code}' \
             --max-time 120 --retry 2 --retry-connrefused \
-            -X POST "${{ secrets.BACKEND_URL }}/api/v1/internal/refresh" \
-            -H "X-Cron-Key: ${{ secrets.CRON_SECRET }}")
+            -X POST "$BACKEND_URL/api/v1/internal/refresh" \
+            -H "X-Cron-Key: $CRON_SECRET")
           echo "HTTP $code"; cat /tmp/out.txt; echo
           # 202 = accepted. Anything else is a real failure worth a red X.
           test "$code" = "202"
