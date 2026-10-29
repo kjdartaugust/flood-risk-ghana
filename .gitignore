@@ -19,6 +19,7 @@ out/
 # Env & secrets
 .env
 .env.local
+.env.render
 *.pem
 
 # Data
