@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -89,6 +90,28 @@ class AlertResponse(BaseModel):
     expires_at: dt.datetime
 
 
+# Where browsers mint push endpoints. The server POSTs to a subscriber's endpoint
+# every time an alert fires, so accepting any URL would let a caller aim it at an
+# address of their choosing — internal ones included. A leading dot means "any
+# subdomain of"; anything else must match exactly.
+PUSH_SERVICE_HOSTS = (
+    "fcm.googleapis.com",                 # Chrome, Android, Opera, Samsung Internet
+    "android.googleapis.com",             # endpoints minted by older Chrome builds
+    "updates.push.services.mozilla.com",  # Firefox
+    ".push.apple.com",                    # Safari, and iOS home-screen web apps
+    ".notify.windows.com",                # Edge
+)
+
+
+def is_push_service(url: str) -> bool:
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and any(
+        host.endswith(h) if h.startswith(".") else host == h
+        for h in PUSH_SERVICE_HOSTS
+    )
+
+
 class PushSubscription(BaseModel):
     """What `PushManager.subscribe()` hands back in the browser, passed through.
 
@@ -98,6 +121,13 @@ class PushSubscription(BaseModel):
 
     endpoint: str = Field(min_length=1)
     keys: dict[str, str]
+
+    @field_validator("endpoint")
+    @classmethod
+    def _is_a_browser_push_service(cls, v: str) -> str:
+        if not is_push_service(v):
+            raise ValueError("endpoint is not a known browser push service")
+        return v
 
     @field_validator("keys")
     @classmethod
