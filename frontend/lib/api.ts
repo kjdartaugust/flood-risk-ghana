@@ -47,6 +47,22 @@ export interface Alert {
   expires_at: string;
 }
 
+export interface SubscribeRequest {
+  route_id: string;
+  channel: "web" | "push";
+  /** Exactly what `PushManager.subscribe()` returned — passed through verbatim. */
+  push_subscription?: PushSubscriptionJSON;
+}
+
+export interface SubscribeResponse {
+  id: string;
+  route_id: string;
+  channel: string;
+  created: boolean;
+  /** False ⇒ stored, but the server can't actually push. Don't promise a ping. */
+  delivers: boolean;
+}
+
 export interface FloodReport {
   id: string;
   lat: number;
@@ -58,22 +74,44 @@ export interface FloodReport {
   source?: string;
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+/** Thrown so callers can branch on status (404 = unknown area, 503 = push off). */
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  token?: string | null
+): Promise<T> {
+  const res = await fetch(`${API}${path}`, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      ...init?.headers,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
   return res.json() as Promise<T>;
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
-}
+const get = <T,>(path: string, token?: string | null) =>
+  request<T>(path, undefined, token);
+
+const post = <T,>(path: string, body: unknown, token?: string | null) =>
+  request<T>(
+    path,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    token
+  );
 
 export const api = {
   riskPoint: (lat: number, lng: number) =>
@@ -86,6 +124,10 @@ export const api = {
     ),
   routes: () => get<RouteSummary[]>(`/routes`),
   alerts: () => get<Alert[]>(`/alerts`),
+  /** 503 when the server has no VAPID keys — push is simply off. */
+  vapidKey: () => get<{ public_key: string }>(`/alerts/vapid-key`),
+  subscribe: (body: SubscribeRequest, token: string) =>
+    post<SubscribeResponse>(`/alerts/subscribe`, body, token),
   reportFlood: (r: {
     lat: number;
     lng: number;
