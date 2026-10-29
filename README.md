@@ -163,15 +163,23 @@ Render's free plan has no background workers, so the rainfall + route-alert cycl
 runs as an external cron: [`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)
 POSTs to `/api/v1/internal/refresh` every 3 hours.
 
-To enable it, set the same secret in both places:
+To switch it on — together with Web Push delivery of the alerts it raises — run:
 
-- **Render** → Environment → `CRON_SECRET` = *(any long random string)*
-- **GitHub** → Settings → Secrets and variables → Actions:
-  - `CRON_SECRET` — the same value
-  - `BACKEND_URL` — `https://floodwatch-backend-dlni.onrender.com`
+```bash
+node scripts/setup-alerts.mjs   # needs the gh CLI, logged in
+```
+
+It mints `CRON_SECRET` and a VAPID keypair, sets `CRON_SECRET` and `BACKEND_URL`
+as GitHub repository secrets, and writes the Render half (`CRON_SECRET`,
+`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`) to `.env.render`
+(git-ignored) and the clipboard. Paste that into **Render → Environment →
+Add from .env**. Nothing is printed, and re-running reuses `.env.render`.
 
 Without `CRON_SECRET` the endpoint fails closed (503) rather than sitting open.
 Trigger a run by hand from the Actions tab (**refresh → Run workflow**).
+
+GitHub pauses scheduled workflows in a public repo after 60 days without a
+commit. If refreshes stop, re-enable **refresh** from the Actions tab.
 
 ## Disclaimer
 
