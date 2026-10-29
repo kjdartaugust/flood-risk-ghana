@@ -131,6 +131,23 @@ def test_push_subscription_needs_its_encryption_keys():
                                             "keys": {"p256dh": "B..."}})
 
 
+def test_push_endpoint_must_be_a_browser_push_service():
+    """We POST to this URL on every alert, so a caller must not get to pick it."""
+    for bad in ("https://169.254.169.254/latest/meta-data",
+                "http://fcm.googleapis.com/fcm/send/abc",
+                "https://fcm.googleapis.com.evil.example/abc",
+                "https://fcm.googleapis.com@evil.example/abc",
+                "https://evilpush.apple.com/abc"):
+        with pytest.raises(ValidationError, match="push service"):
+            SubscribeRequest(route_id="r1", channel="push",
+                             push_subscription={**SUB, "endpoint": bad})
+    for good in ("https://updates.push.services.mozilla.com/wpush/v2/abc",
+                 "https://web.push.apple.com/QK9abc",
+                 "https://wns2-par02p.notify.windows.com/w/?token=abc"):
+        SubscribeRequest(route_id="r1", channel="push",
+                         push_subscription={**SUB, "endpoint": good})
+
+
 def test_generated_vapid_keys_are_the_right_shape():
     """P-256: a 65-byte uncompressed point and a 32-byte scalar, base64url."""
     pub, priv = push.generate_keys()
