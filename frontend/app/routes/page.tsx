@@ -1,6 +1,7 @@
 "use client";
 
 import useSWR from "swr";
+import SubscribeButton from "@/components/SubscribeButton";
 import { Alert, api, RouteSummary } from "@/lib/api";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -25,7 +26,8 @@ export default function RoutesPage() {
       <h2>Trotro route flood alerts</h2>
       <p className="muted">
         Live flood status for Accra trotro corridors, combining the flood-risk
-        layer with forecast rainfall. Updated every few minutes.
+        layer with forecast rainfall. The rain forecast is checked every 3
+        hours.
       </p>
 
       {alerts && alerts.length > 0 && (
@@ -66,6 +68,7 @@ export default function RoutesPage() {
               Baseline risk {r.baseline_risk.toFixed(0)}/100
               {r.active_alert ? " · ⚠ alert active" : ""}
             </span>
+            <SubscribeButton routeId={r.id} />
           </div>
         ))}
       </div>
