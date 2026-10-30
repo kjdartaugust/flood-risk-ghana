@@ -17,7 +17,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.main import app
+from app.services import push
 
 
 def _db_available() -> bool:
@@ -122,3 +124,22 @@ def test_flood_report_persists_end_to_end():
 def test_flood_report_rejects_out_of_ghana():
     r = client.post("/api/v1/reports", json={"lat": 51.5, "lng": -0.12})
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_server_mints_its_push_keys_once_and_keeps_them(monkeypatch):
+    """No VAPID env ⇒ push still works, and a restart must not swap the pair —
+    every existing subscription is bound to it."""
+    def restart():
+        monkeypatch.setattr(settings, "vapid_public_key", "")
+        monkeypatch.setattr(settings, "vapid_private_key", "")
+
+    restart()
+    await push.load_keys()
+    minted = (settings.vapid_public_key, settings.vapid_private_key)
+    assert len(minted[0]) == 87 and len(minted[1]) == 43
+
+    restart()
+    await push.load_keys()
+    assert (settings.vapid_public_key, settings.vapid_private_key) == minted
+    assert client.get("/api/v1/alerts/vapid-key").json()["public_key"] == minted[0]

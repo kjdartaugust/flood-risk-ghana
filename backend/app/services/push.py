@@ -12,7 +12,9 @@ which the map and `GET /alerts` serve regardless. A dead endpoint, a missing
 VAPID key or an uninstalled `pywebpush` must never take down the ETL cycle, so
 failures here are logged and reported, never raised.
 
-Generate a keypair (once, then set the env vars it prints):
+**No setup.** On first boot the server mints its own keypair and keeps it in the
+database (`load_keys`). To bring your own instead, set the env vars this prints —
+before anyone subscribes, since subscriptions are bound to the pair:
 
     python -m app.services.push --generate-keys
 """
@@ -24,7 +26,12 @@ import json
 import logging
 from typing import Any
 
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
+from app.db import SessionLocal
+from app.models import ServerKey
 
 log = logging.getLogger("push")
 
@@ -102,6 +109,40 @@ def generate_keys() -> tuple[str, str]:
         Encoding.X962, PublicFormat.UncompressedPoint
     )
     return _b64(public), _b64(private)
+
+
+async def _stored_pair(db: AsyncSession) -> dict[str, str]:
+    row = await db.get(ServerKey, "vapid")
+    if row is None:
+        public, private = generate_keys()
+        # Two instances booting at once must settle on one pair, so insert only
+        # if absent, then read back whichever pair won.
+        await db.execute(
+            insert(ServerKey)
+            .values(name="vapid", value={"public": public, "private": private})
+            .on_conflict_do_nothing(index_elements=["name"])
+        )
+        await db.commit()
+        row = await db.get(ServerKey, "vapid")
+    return row.value
+
+
+async def load_keys() -> None:
+    """Give this process a VAPID pair: the environment's if it set one, else the
+    one this server keeps in the database — minted now if this is first boot.
+
+    Never raises: without keys push just stays off, which everything handles.
+    """
+    if settings.vapid_private_key and settings.vapid_public_key:
+        return
+    try:
+        async with SessionLocal() as db:
+            pair = await _stored_pair(db)
+    except Exception:
+        log.exception("could not load VAPID keys from the database; push stays off")
+        return
+    settings.vapid_public_key = pair["public"]
+    settings.vapid_private_key = pair["private"]
 
 
 if __name__ == "__main__":  # pragma: no cover
