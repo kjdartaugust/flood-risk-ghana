@@ -1,11 +1,14 @@
 """FastAPI application factory.
 
-Wires routers, CORS, OpenAPI metadata and a lightweight startup check. Auth is
-per-endpoint (Supabase JWT) rather than global so the public risk map stays open.
+Wires routers, CORS, OpenAPI metadata and loads the Web Push keys at startup.
+Auth is per-endpoint (Supabase JWT) rather than global so the public risk map
+stays open.
 """
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.api.routes import alerts, health, internal, reports, risk, routes_ep
 from app.config import settings
+from app.services import push
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,11 +29,19 @@ DESCRIPTION = """
 """
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Before the first request, so /alerts/vapid-key can hand out the key at once.
+    await push.load_keys()
+    yield
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="FloodWatch Ghana",
         version=__version__,
         description=DESCRIPTION,
+        lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",

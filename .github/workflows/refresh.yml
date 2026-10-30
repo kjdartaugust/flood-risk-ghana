@@ -3,22 +3,25 @@
 # Render's free plan has no background workers, so `app.etl.worker` (APScheduler)
 # is never deployed and the rainfall/alert cycle never runs in production. This
 # workflow is the substitute: GitHub Actions cron is free, and it calls a
-# token-protected endpoint on the web service to do the work.
+# protected endpoint on the web service to do the work.
 #
 # This is NOT an uptime pinger. It runs every 3 hours to refresh forecast
 # rainfall and re-evaluate route flood alerts — the service is free to sleep in
 # between, and the first call after a sleep just eats the cold start.
 #
-# Repository secrets (both required to actually run; if either is missing the
-# job skips quietly rather than failing — route alerts are simply off):
+# No shared secret: the job asks GitHub for a short-lived signed token (OIDC)
+# naming this repo and this workflow, and the backend checks GitHub's signature.
+# The one setting is where the backend lives, as a repository secret:
 #   BACKEND_URL  e.g. https://floodwatch-backend-dlni.onrender.com
-#   CRON_SECRET  must match CRON_SECRET in the Render environment
 name: refresh
 
 on:
   schedule:
     - cron: "0 */3 * * *"
   workflow_dispatch: # lets you trigger a refresh by hand from the Actions tab
+
+permissions:
+  id-token: write # lets the job ask GitHub for the token that proves who it is
 
 jobs:
   refresh:
@@ -27,25 +30,34 @@ jobs:
       - name: Trigger rainfall + alert refresh
         env:
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          # Not configured yet? Skip quietly. A scheduled job that fails because
-          # a feature was never switched on emails the repo owner every time it
-          # fires — 8 nags a day that say nothing except "you haven't set this
-          # up". Silence is the correct signal for "off"; red is for "broken".
-          if [ -z "$BACKEND_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "::notice::BACKEND_URL / CRON_SECRET not set — skipping refresh."
-            echo "Set both as repository secrets to switch route alerts on (see README)."
+          # Not configured (a fork, say)? Skip quietly. A scheduled job that
+          # fails because a feature was never switched on emails the repo owner
+          # every time it fires — 8 nags a day that say nothing except "you
+          # haven't set this up". Silence is the correct signal for "off"; red
+          # is for "broken".
+          if [ -z "$BACKEND_URL" ]; then
+            echo "::notice::BACKEND_URL not set — skipping refresh."
+            echo "Set it as a repository secret to switch route alerts on (see README)."
             exit 0
           fi
 
-          # Render's free instance spins down after ~15 min idle and takes ~50s
-          # to wake. --max-time covers the cold start; the refresh itself runs
-          # as a background task, so the endpoint answers 202 straight away.
+          # Render's free instance spins down after ~15 min idle and takes up to
+          # ~90 s to wake. Wake it first, so the token below (good for ~5 min)
+          # isn't spent waiting out a cold start.
+          curl -sS -o /dev/null --max-time 180 --retry 2 --retry-connrefused \
+            "$BACKEND_URL/api/v1/health" || true
+
+          token=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=floodwatch-refresh" | jq -r .value)
+          echo "::add-mask::$token"
+
+          # The refresh itself runs as a background task, so the endpoint
+          # answers 202 straight away.
           code=$(curl -sS -o /tmp/out.txt -w '%{http_code}' \
-            --max-time 120 --retry 2 --retry-connrefused \
+            --max-time 60 --retry 2 --retry-connrefused \
             -X POST "$BACKEND_URL/api/v1/internal/refresh" \
-            -H "X-Cron-Key: $CRON_SECRET")
+            -H "Authorization: Bearer $token")
           echo "HTTP $code"; cat /tmp/out.txt; echo
           # 202 = accepted. Anything else is a real failure worth a red X.
           test "$code" = "202"

@@ -163,19 +163,21 @@ Render's free plan has no background workers, so the rainfall + route-alert cycl
 runs as an external cron: [`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)
 POSTs to `/api/v1/internal/refresh` every 3 hours.
 
-To switch it on — together with Web Push delivery of the alerts it raises — run:
+There are no secrets to set up — only the `BACKEND_URL` repository secret, so the
+workflow knows where to call:
 
-```bash
-node scripts/setup-alerts.mjs   # needs the gh CLI, logged in
-```
+- **The cron proves who it is with a GitHub Actions OIDC token**: a short-lived
+  token GitHub signs, naming the repo and workflow. The backend checks GitHub's
+  signature and that the token comes from `refresh.yml` in the repo it was
+  deployed from. Render provides that repo as `RENDER_GIT_REPO_SLUG`; on other
+  hosts set `CRON_GITHUB_REPO`. Any other scheduler can send a `CRON_SECRET` as
+  `X-Cron-Key` instead.
+- **Web Push keys make themselves.** On first boot the backend mints a VAPID
+  keypair and keeps it in the database (`server_keys`). To bring your own, set
+  `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` before anyone subscribes, since a new
+  pair orphans every existing subscription.
 
-It mints `CRON_SECRET` and a VAPID keypair, sets `CRON_SECRET` and `BACKEND_URL`
-as GitHub repository secrets, and writes the Render half (`CRON_SECRET`,
-`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`) to `.env.render`
-(git-ignored) and the clipboard. Paste that into **Render → Environment →
-Add from .env**. Nothing is printed, and re-running reuses `.env.render`.
-
-Without `CRON_SECRET` the endpoint fails closed (503) rather than sitting open.
+With neither a repo nor `CRON_SECRET` configured, the endpoint fails closed (503).
 Trigger a run by hand from the Actions tab (**refresh → Run workflow**).
 
 GitHub pauses scheduled workflows in a public repo after 60 days without a

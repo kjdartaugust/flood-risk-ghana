@@ -13,9 +13,14 @@ def client():
     return TestClient(create_app())
 
 
-def test_disabled_when_no_secret_is_set(client, monkeypatch):
+async def _noop_cycle():
+    pass
+
+
+def test_disabled_when_nothing_is_configured(client, monkeypatch):
     """Absent config must fail closed, not open."""
     monkeypatch.setattr(settings, "cron_secret", "")
+    monkeypatch.setattr(settings, "cron_github_repo", "")
     r = client.post("/api/v1/internal/refresh")
     assert r.status_code == 503
 
@@ -42,3 +47,30 @@ def test_accepts_valid_key_and_returns_immediately(client, monkeypatch):
     assert r.json()["status"] == "accepted"
     # TestClient runs background tasks before returning, so the task was wired up.
     assert ran == [True]
+
+
+def test_accepts_a_token_from_this_repos_refresh_workflow(client, monkeypatch):
+    """No shared secret at all: GitHub vouches for the caller."""
+    monkeypatch.setattr(settings, "cron_secret", "")
+    monkeypatch.setattr(settings, "cron_github_repo", "owner/repo")
+    asked = []
+
+    async def github_says(token, repo, workflow):
+        asked.append((token, repo, workflow))
+        return token == "minted-by-github"
+
+    monkeypatch.setattr("app.api.routes.internal.is_github_workflow", github_says)
+    monkeypatch.setattr("app.api.routes.internal.refresh_cycle", _noop_cycle)
+
+    ok = client.post("/api/v1/internal/refresh",
+                     headers={"Authorization": "Bearer minted-by-github"})
+    assert ok.status_code == 202
+    assert asked == [("minted-by-github", "owner/repo", "refresh.yml")]
+
+    forged = client.post("/api/v1/internal/refresh",
+                         headers={"Authorization": "Bearer forged"})
+    assert forged.status_code == 401
+    # With no CRON_SECRET set, no key is a way in — not even an empty one.
+    for key in ("", "guess"):
+        assert client.post("/api/v1/internal/refresh",
+                           headers={"X-Cron-Key": key}).status_code == 401

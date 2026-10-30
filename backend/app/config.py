@@ -1,13 +1,14 @@
 """Application configuration via pydantic-settings.
 
 All values are read from environment variables (see .env.example). Fields have
-sensible local-compose defaults so the app boots without a full secret set.
+sensible local-compose defaults so the app boots without a full secret set. The
+one exception: an empty VAPID pair is filled in at startup from the database.
 """
 from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,13 +49,25 @@ class Settings(BaseSettings):
     rainfall_refresh_cron: str = Field(
         default="*/30 * * * *", alias="RAINFALL_REFRESH_CRON"
     )
-    # Shared secret for POST /internal/refresh. Render's free tier has no
-    # background workers, so the scheduled ETL runs as an external cron (GitHub
-    # Actions) calling that endpoint. Empty ⇒ endpoint disabled.
+    # Who may call POST /internal/refresh. Render's free tier has no background
+    # workers, so the scheduled ETL runs as an external cron (GitHub Actions)
+    # calling that endpoint. Either credential is enough; neither ⇒ disabled.
+    #
+    # The repo whose `refresh.yml` may call it with a GitHub Actions OIDC token.
+    # GitHub signs that token, so there is no secret to copy anywhere — and
+    # Render sets RENDER_GIT_REPO_SLUG to the repo it deploys, so on Render
+    # this configures itself.
+    cron_github_repo: str = Field(
+        default="",
+        validation_alias=AliasChoices("CRON_GITHUB_REPO", "RENDER_GIT_REPO_SLUG"),
+    )
+    # A shared secret sent as X-Cron-Key, for any other scheduler.
     cron_secret: str = Field(default="", alias="CRON_SECRET")
 
-    # Web Push (VAPID). Mint a pair with `python -m app.services.push`. Empty ⇒
-    # push delivery is disabled and alerts are logged instead (dev/CI default).
+    # Web Push (VAPID). Empty ⇒ the server mints a pair on first boot and keeps
+    # it in the database (`push.load_keys`), so push needs no setup. Set these
+    # only to bring your own, and only before anyone subscribes: subscriptions
+    # are bound to the pair, so swapping it silently orphans all of them.
     vapid_public_key: str = Field(default="", alias="VAPID_PUBLIC_KEY")
     vapid_private_key: str = Field(default="", alias="VAPID_PRIVATE_KEY")
     # Push services require a contactable `sub` claim in the VAPID JWT so they

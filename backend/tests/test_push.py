@@ -155,6 +155,30 @@ def test_generated_vapid_keys_are_the_right_shape():
     assert "=" not in pub and "+" not in pub and "/" not in pub
 
 
+def _db_down():
+    raise ConnectionError("database unreachable")
+
+
+@pytest.mark.asyncio
+async def test_keys_from_the_environment_win(monkeypatch):
+    """Bring-your-own keys are used as-is; the database isn't even opened."""
+    monkeypatch.setattr(settings, "vapid_public_key", "pub")
+    monkeypatch.setattr(settings, "vapid_private_key", "priv")
+    monkeypatch.setattr(push, "SessionLocal", _db_down)
+    await push.load_keys()
+    assert (settings.vapid_public_key, settings.vapid_private_key) == ("pub", "priv")
+
+
+@pytest.mark.asyncio
+async def test_loading_keys_survives_a_database_outage(monkeypatch):
+    """It runs at boot: no keys must mean no push, not no app."""
+    monkeypatch.setattr(settings, "vapid_public_key", "")
+    monkeypatch.setattr(settings, "vapid_private_key", "")
+    monkeypatch.setattr(push, "SessionLocal", _db_down)
+    await push.load_keys()
+    assert push.push_enabled() is False
+
+
 def test_vapid_key_endpoint_503s_when_push_is_off(monkeypatch):
     """The UI reads this to decide whether to offer the button at all."""
     monkeypatch.setattr(settings, "vapid_public_key", "")

@@ -164,3 +164,19 @@ class AlertSubscription(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "route_id", "channel", name="uq_sub_user_route"),
     )
+
+
+class ServerKey(Base):
+    """A key the server minted for itself on first boot (today: the VAPID pair).
+
+    Kept here rather than in the environment so a fresh deploy can send Web Push
+    with nothing to configure. Never served by the API.
+    """
+
+    __tablename__ = "server_keys"
+
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
