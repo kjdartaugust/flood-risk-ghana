@@ -163,6 +163,38 @@ class SubscribeResponse(BaseModel):
     delivers: bool = True
 
 
+class HourlyRain(BaseModel):
+    time: list[str]
+    precipitation: list[float | None]
+
+
+class RainForecast(BaseModel):
+    """One point's forecast as Open-Meteo returns it; other fields are ignored."""
+
+    hourly: HourlyRain
+
+
+class RefreshRequest(BaseModel):
+    """Rain the caller fetched as GET /internal/refresh/plan asked, for when
+    Open-Meteo turns the server's own IP away. No body: the server fetches."""
+
+    points: list[tuple[float, float]] = Field(min_length=1, max_length=500)
+    forecasts: list[RainForecast]
+
+    @model_validator(mode="after")
+    def _one_forecast_per_point(self) -> RefreshRequest:
+        if len(self.forecasts) != len(self.points):
+            raise ValueError("need exactly one forecast per point")
+        return self
+
+
+class RefreshPlanResponse(BaseModel):
+    """What to fetch for a refresh: the sample points, and the exact request."""
+
+    points: list[tuple[float, float]]
+    url: str
+
+
 class RefreshRunResponse(BaseModel):
     """One scheduled refresh: when it ran and what it got done."""
 

@@ -15,6 +15,12 @@ A 202 only says a run started. Each run is recorded in `refresh_runs`, and
 `GET /internal/refresh` serves the latest — how anyone outside the host can tell
 whether it actually saved any rain.
 
+The scheduler can also bring the rain with it. Open-Meteo's free API limits
+each IP per day and Render's free tier shares one outbound IP among many apps,
+so from here Open-Meteo answers 429 "Daily API request limit exceeded". The
+workflow asks `GET /internal/refresh/plan` what to fetch, fetches it from its
+own IP, and posts it with the trigger.
+
 There is no user here, so auth isn't a user JWT. Either of these is enough:
 
 * a GitHub Actions OIDC token from `refresh.yml` in the repo this server was
@@ -37,9 +43,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import SessionLocal, get_db
-from app.etl.rainfall import refresh_rainfall
+from app.etl.rainfall import openmeteo_url, refresh_rainfall, sample_points, top_tiles
 from app.models import RefreshRun
-from app.schemas import RefreshRunResponse
+from app.schemas import RefreshPlanResponse, RefreshRequest, RefreshRunResponse
 from app.security import bearer, is_github_workflow
 from app.services.alerts_service import evaluate_and_raise_alerts
 from app.services.push import load_keys
@@ -93,16 +99,19 @@ def _summary(exc: Exception) -> str:
     return f"{type(exc).__name__}: {first}"[:300]
 
 
-async def refresh_cycle(run_id: int | None = None) -> None:
-    """Pull rainfall, then re-evaluate route flood alerts against it, and record
-    how it went."""
+async def refresh_cycle(
+    run_id: int | None = None,
+    fetched: tuple[list, list] | None = None,
+) -> None:
+    """Pull rainfall (or take what the caller `fetched`), then re-evaluate route
+    flood alerts against it, and record how it went."""
     # A no-op once the web app has loaded them; here for the standalone worker.
     await load_keys()
     if run_id is None:
         run_id = await _start_run()
     try:
         async with SessionLocal() as db:
-            rows = await refresh_rainfall(db)
+            rows = await refresh_rainfall(db, fetched=fetched)
         async with SessionLocal() as db:
             raised = await evaluate_and_raise_alerts(db)
         log.info("refresh done: %d rainfall rows, %d alerts raised", rows, raised)
@@ -118,16 +127,31 @@ async def refresh_cycle(run_id: int | None = None) -> None:
 @router.post("/refresh", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_refresh(
     background: BackgroundTasks,
+    body: RefreshRequest | None = None,
     x_cron_key: str | None = Header(default=None, alias="X-Cron-Key"),
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> dict:
     """Kick off a rainfall + alert-evaluation cycle. Returns immediately, with
     the run's id; GET /internal/refresh says how it went."""
     await _authorise(x_cron_key, creds.credentials if creds else None)
+    fetched = None
+    if body is not None:
+        fetched = (body.points, [f.model_dump() for f in body.forecasts])
     run_id = await _start_run()
-    background.add_task(refresh_cycle, run_id)
-    log.info("refresh %d accepted", run_id)
+    background.add_task(refresh_cycle, run_id, fetched)
+    log.info("refresh %d accepted (%s)", run_id,
+             "rain posted" if fetched else "will fetch rain")
     return {"status": "accepted", "run": run_id}
+
+
+@router.get("/refresh/plan", response_model=RefreshPlanResponse,
+            summary="What to fetch for a refresh")
+async def refresh_plan(db: AsyncSession = Depends(get_db)) -> RefreshPlanResponse:
+    """For a scheduler that fetches the rain itself and posts it back, because
+    Open-Meteo turns this server's shared IP away (see `app.etl.rainfall`).
+    Public: the points are tile centroids, which /risk/tiles already serves."""
+    points = sample_points(await top_tiles(db))
+    return RefreshPlanResponse(points=points, url=openmeteo_url(points))
 
 
 @router.get("/refresh", response_model=RefreshRunResponse,

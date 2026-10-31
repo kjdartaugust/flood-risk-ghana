@@ -22,7 +22,7 @@ def runs_without_a_db(monkeypatch):
     monkeypatch.setattr("app.api.routes.internal._start_run", start_run)
 
 
-async def _noop_cycle(run_id):
+async def _noop_cycle(run_id, fetched=None):
     pass
 
 
@@ -47,7 +47,7 @@ def test_accepts_valid_key_and_returns_immediately(client, monkeypatch):
     monkeypatch.setattr(settings, "cron_secret", "s3cret")
     ran = []
 
-    async def fake_cycle(run_id):
+    async def fake_cycle(run_id, fetched=None):
         ran.append(run_id)
 
     monkeypatch.setattr("app.api.routes.internal.refresh_cycle", fake_cycle)
@@ -80,7 +80,32 @@ def test_accepts_a_token_from_this_repos_refresh_workflow(client, monkeypatch):
     forged = client.post("/api/v1/internal/refresh",
                          headers={"Authorization": "Bearer forged"})
     assert forged.status_code == 401
-    # With no CRON_SECRET set, no key is a way in — not even an empty one.
+    # With no CRON_SECRET set, no key is a way in, not even an empty one.
     for key in ("", "guess"):
         assert client.post("/api/v1/internal/refresh",
                            headers={"X-Cron-Key": key}).status_code == 401
+
+
+def test_rain_fetched_by_the_caller_is_handed_to_the_cycle(client, monkeypatch):
+    """The scheduler may bring the rain, because Open-Meteo turns Render's
+    shared IP away. It goes to the cycle as given, Open-Meteo's extras dropped."""
+    monkeypatch.setattr(settings, "cron_secret", "s3cret")
+    got = []
+
+    async def fake_cycle(run_id, fetched=None):
+        got.append(fetched)
+
+    monkeypatch.setattr("app.api.routes.internal.refresh_cycle", fake_cycle)
+    hourly = {"time": ["2026-10-31T12:00"], "precipitation": [4.2]}
+    r = client.post("/api/v1/internal/refresh", headers={"X-Cron-Key": "s3cret"},
+                    json={"points": [[5.55, -0.2]],
+                          "forecasts": [{"hourly": hourly, "latitude": 5.55}]})
+    assert r.status_code == 202
+    assert got == [([(5.55, -0.2)], [{"hourly": hourly}])]
+
+    # One forecast per point, or it's refused before any work starts.
+    r = client.post("/api/v1/internal/refresh", headers={"X-Cron-Key": "s3cret"},
+                    json={"points": [[5.55, -0.2], [5.6, -0.2]],
+                          "forecasts": [{"hourly": hourly}]})
+    assert r.status_code == 422
+    assert len(got) == 1
