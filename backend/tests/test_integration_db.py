@@ -11,6 +11,7 @@ Run locally with:  docker compose up -d postgis redis
 """
 from __future__ import annotations
 
+import datetime as dt
 import os
 
 import psycopg
@@ -18,6 +19,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import settings
+from app.db import SessionLocal
+from app.etl import rainfall
 from app.main import app
 from app.services import push
 
@@ -143,3 +146,30 @@ async def test_server_mints_its_push_keys_once_and_keeps_them(monkeypatch):
     await push.load_keys()
     assert (settings.vapid_public_key, settings.vapid_private_key) == minted
     assert client.get("/api/v1/alerts/vapid-key").json()["public_key"] == minted[0]
+
+
+@pytest.mark.asyncio
+async def test_rain_refresh_upserts_and_routes_forecast_from_it(monkeypatch):
+    """The scheduled job's real SQL, minus the network: every tile's hours land,
+    a second run updates them in place, and routes then forecast from them."""
+    start = dt.datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    times = [(start + dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M")
+             for h in range(-3, 9)]
+
+    def rain(mm):
+        async def fetch(client, points):
+            return [{"hourly": {"time": times, "precipitation": [mm] * len(times)}}
+                    for _ in points]
+        return fetch
+
+    for mm in (2.0, 7.0):
+        monkeypatch.setattr(rainfall, "_fetch_openmeteo", rain(mm))
+        async with SessionLocal() as db:
+            assert await rainfall.refresh_rainfall(db, limit_tiles=5000) > 0
+
+    forecasts = [client.get(f"/api/v1/routes/{r['id']}/forecast").json()
+                 for r in client.get("/api/v1/routes").json()]
+    points = [p for f in forecasts for p in f["points"]]
+    assert points, "no route crosses a refreshed tile"
+    # Updated in place: the second run's value, not a duplicate of the first.
+    assert {p["precip_mm"] for p in points} == {7.0}
