@@ -208,4 +208,33 @@ def test_each_refresh_records_whether_it_saved_rain(monkeypatch):
             assert run["error"] is None and run["rainfall_rows"] > 0
         else:
             assert run["rainfall_rows"] is None
-            assert "rain fetch failed for all" in run["error"]
+            assert "every rain fetch failed" in run["error"]
+
+
+def test_refresh_saves_rain_the_caller_fetched_as_planned(monkeypatch):
+    """Production path: Open-Meteo turns Render's shared IP away, so the
+    scheduler fetches what /refresh/plan asks for and posts it back. The server
+    must save that, and must not fetch on its own."""
+    monkeypatch.setattr(settings, "cron_secret", "s3cret")
+    monkeypatch.setattr(settings, "vapid_public_key", "")
+    monkeypatch.setattr(settings, "vapid_private_key", "")
+
+    async def must_not_fetch(client, points):
+        raise AssertionError("the server fetched rain it was handed")
+
+    monkeypatch.setattr(rainfall, "_fetch_openmeteo", must_not_fetch)
+
+    plan = client.get("/api/v1/internal/refresh/plan").json()
+    assert plan["points"]
+    assert plan["url"].startswith(f"{settings.openmeteo_base}/forecast?latitude=")
+    times = [(dt.datetime.now(dt.UTC) + dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:00")
+             for h in range(-2, 4)]
+    hourly = {"time": times, "precipitation": [3.0] * len(times)}
+    started = client.post(
+        "/api/v1/internal/refresh", headers={"X-Cron-Key": "s3cret"},
+        json={"points": plan["points"],
+              "forecasts": [{"hourly": hourly} for _ in plan["points"]]})
+    assert started.status_code == 202
+    run = client.get("/api/v1/internal/refresh").json()
+    assert run["id"] == started.json()["run"]
+    assert run["error"] is None and run["rainfall_rows"] > 0

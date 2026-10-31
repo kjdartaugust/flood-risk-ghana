@@ -181,6 +181,13 @@ workflow knows where to call:
 With neither a repo nor `CRON_SECRET` configured, the endpoint fails closed (503).
 Trigger a run by hand from the Actions tab (**refresh → Run workflow**).
 
+The workflow also **fetches the rain itself** and posts it with the trigger.
+Open-Meteo's free API limits each IP per day, and Render's free tier shares one
+outbound IP among many apps, so requests from the backend get "Daily API request
+limit exceeded". The backend says what to fetch (`GET /api/v1/internal/refresh/plan`:
+about 26 sample points, since the weather model's grid is ~10 km), and still
+fetches for itself when nothing is posted.
+
 The `202` only means a run started. Each run is recorded, and
 `GET /api/v1/internal/refresh` shows the latest: when it started and finished, how
 many rain rows it saved, how many alerts it raised, or the error. The workflow
