@@ -48,31 +48,23 @@ async def _fetch_openmeteo(
     return data if isinstance(data, list) else [data]
 
 
-async def _apply(db: AsyncSession, tile: RiskTile, data: dict,
-                 now: dt.datetime) -> int:
-    """Upsert one tile's hourly series and refresh its recent-rainfall feature."""
+def _rows(tile: RiskTile, data: dict, now: dt.datetime) -> list[dict]:
+    """One tile's hourly series as rainfall_obs rows; also refreshes the tile's
+    recent-rainfall feature."""
     hourly = data.get("hourly", {})
-    times = hourly.get("time", [])
-    precip = hourly.get("precipitation", [])
-    rows = 0
-    for ts, mm in zip(times, precip, strict=False):
-        observed_at = dt.datetime.fromisoformat(ts).replace(tzinfo=dt.UTC)
-        stmt = insert(RainfallObs).values(
-            h3_index=tile.h3_index, observed_at=observed_at,
-            horizon="forecast" if observed_at > now else "obs",
-            precip_mm=float(mm or 0.0), source="open-meteo",
-        ).on_conflict_do_update(
-            constraint="uq_rain_cell_ts",
-            set_={"precip_mm": float(mm or 0.0)},
-        )
-        await db.execute(stmt)
-        rows += 1
+    series = [
+        (dt.datetime.fromisoformat(ts).replace(tzinfo=dt.UTC), float(mm or 0.0))
+        for ts, mm in zip(hourly.get("time", []), hourly.get("precipitation", []),
+                          strict=False)
+    ]
     # keep the tile's recent-rainfall feature warm
-    tile.rainfall_recent_mm = round(sum(
-        float(m or 0) for t, m in zip(times, precip, strict=False)
-        if dt.datetime.fromisoformat(t).replace(tzinfo=dt.UTC) <= now
-    ), 2)
-    return rows
+    tile.rainfall_recent_mm = round(sum(mm for at, mm in series if at <= now), 2)
+    return [
+        {"h3_index": tile.h3_index, "observed_at": at,
+         "horizon": "forecast" if at > now else "obs",
+         "precip_mm": mm, "source": "open-meteo"}
+        for at, mm in series
+    ]
 
 
 async def refresh_rainfall(db: AsyncSession, limit_tiles: int = 400) -> int:
@@ -84,6 +76,13 @@ async def refresh_rainfall(db: AsyncSession, limit_tiles: int = 400) -> int:
         log.warning("no risk tiles yet; run ETL tiles/seed first")
         return 0
 
+    # Core table rather than the entity: a plain executemany, no ORM bulk-insert
+    # machinery in the way.
+    upsert = insert(RainfallObs.__table__)
+    upsert = upsert.on_conflict_do_update(
+        constraint="uq_rain_cell_ts",
+        set_={"precip_mm": upsert.excluded.precip_mm},
+    )
     now = dt.datetime.now(dt.UTC)
     rows = 0
     async with httpx.AsyncClient() as client:
@@ -96,8 +95,15 @@ async def refresh_rainfall(db: AsyncSession, limit_tiles: int = 400) -> int:
             except Exception as e:  # noqa: BLE001
                 log.warning("rain fetch failed for batch at %d: %s", i, e)
                 continue
-            for tile, data in zip(chunk, results, strict=False):
-                rows += await _apply(db, tile, data, now)
+            batch = [row for tile, data in zip(chunk, results, strict=False)
+                     for row in _rows(tile, data, now)]
+            # One statement per batch, never one per row. The database is an
+            # ocean away (Render Frankfurt, Neon us-east-1): 400 tiles × 48 hours
+            # sent row by row is 19,200 round trips, ~30 min — and Render stops
+            # an idle free instance after 15, before the single commit below.
+            if batch:
+                await db.execute(upsert, batch)
+            rows += len(batch)
         await db.commit()
     log.info("rainfall refresh: %d rows across %d tiles", rows, len(tiles))
     return rows
