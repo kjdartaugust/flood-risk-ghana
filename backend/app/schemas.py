@@ -151,6 +151,17 @@ class SubscribeRequest(BaseModel):
         return self
 
 
+class UnsubscribeRequest(BaseModel):
+    route_id: str
+    # The browser's push endpoint. Only that browser and its push service know
+    # it, so presenting it is what proves a no-account subscriber is them.
+    endpoint: str = Field(min_length=1, max_length=1000)
+
+
+class UnsubscribeResponse(BaseModel):
+    removed: bool
+
+
 class SubscribeResponse(BaseModel):
     id: str
     route_id: str

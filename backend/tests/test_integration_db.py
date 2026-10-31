@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import uuid
 
 import httpx
 import psycopg
@@ -106,6 +107,28 @@ def test_subscribe_requires_auth():
     r = client.post("/api/v1/alerts/subscribe",
                     json={"route_id": "x", "channel": "web"})
     assert r.status_code == 401
+
+
+def test_anyone_can_subscribe_a_route_for_push_and_stop():
+    """No account: the push endpoint is the identity, both for subscribing and
+    for stopping. An unknown route is a 404, not a 500."""
+    route_id = client.get("/api/v1/routes").json()[0]["id"]
+    sub = {"endpoint": f"https://fcm.googleapis.com/fcm/send/it-{uuid.uuid4()}",
+           "keys": {"p256dh": "BPk...", "auth": "k9..."}}
+    body = {"route_id": route_id, "channel": "push", "push_subscription": sub}
+
+    first = client.post("/api/v1/alerts/subscribe", json=body)
+    assert first.status_code == 200 and first.json()["created"] is True
+    again = client.post("/api/v1/alerts/subscribe", json=body).json()
+    assert again["created"] is False and again["id"] == first.json()["id"]
+    unknown = client.post("/api/v1/alerts/subscribe",
+                          json={**body, "route_id": "no-such-route"})
+    assert unknown.status_code == 404
+
+    stop = {"route_id": route_id, "endpoint": sub["endpoint"]}
+    for removed in (True, False):
+        r = client.post("/api/v1/alerts/unsubscribe", json=stop)
+        assert r.json() == {"removed": removed}
 
 
 def test_flood_report_persists_end_to_end():

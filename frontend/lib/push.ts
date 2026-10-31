@@ -40,7 +40,9 @@ function decodeKey(base64url: string): ArrayBuffer {
 }
 
 /**
- * Subscribe this browser to push alerts for a route.
+ * Subscribe this browser to push alerts for a route. No account needed: the
+ * browser's push subscription is who the server alerts. `token` only matters
+ * on deployments with sign-in, to tie alerts to the account instead.
  *
  * Order matters: we ask the *server* for its key before we ask the *user* for
  * permission. Prompting someone for notification access and only then finding
@@ -49,7 +51,7 @@ function decodeKey(base64url: string): ArrayBuffer {
  */
 export async function enablePush(
   routeId: string,
-  token: string
+  token?: string | null
 ): Promise<SubscribeResponse> {
   if (!pushSupported()) throw new PushUnavailable("unsupported");
 
@@ -88,4 +90,69 @@ export async function enablePush(
     },
     token
   );
+}
+
+async function currentSubscription(): Promise<PushSubscription | null> {
+  const reg = await navigator.serviceWorker.getRegistration();
+  return (await reg?.pushManager.getSubscription()) ?? null;
+}
+
+/**
+ * Stop push alerts for a route. The browser keeps its push subscription:
+ * other routes may still be using it.
+ */
+export async function disablePush(
+  routeId: string,
+  token?: string | null
+): Promise<void> {
+  if (!pushSupported()) return;
+  const sub = await currentSubscription();
+  if (sub) await api.unsubscribe({ route_id: routeId, endpoint: sub.endpoint }, token);
+}
+
+/**
+ * Re-send this browser's push subscription for a route it follows. Browsers
+ * rotate push endpoints, and a stale one on the server means alerts quietly
+ * stop. Never prompts. False if this browser has no subscription any more,
+ * so alerts are off whatever we remembered.
+ */
+export async function refreshPush(
+  routeId: string,
+  token?: string | null
+): Promise<boolean> {
+  if (!pushSupported() || Notification.permission !== "granted") return false;
+  const sub = await currentSubscription();
+  if (!sub) return false;
+  await api.subscribe(
+    {
+      route_id: routeId,
+      channel: "push",
+      push_subscription: sub.toJSON() as PushSubscriptionJSON,
+    },
+    token
+  );
+  return true;
+}
+
+// Which routes this browser follows, so "Alerts on" survives a reload. Only a
+// convenience: storage can be blocked or cleared, and then the button forgets.
+const FOLLOWED = "floodwatch.alertRoutes";
+
+export function followedRoutes(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(FOLLOWED) ?? "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+export function setFollowed(routeId: string, on: boolean): void {
+  try {
+    const routes = followedRoutes();
+    if (on) routes.add(routeId);
+    else routes.delete(routeId);
+    localStorage.setItem(FOLLOWED, JSON.stringify([...routes]));
+  } catch {
+    // Storage blocked (private mode): alerts still work, the label just resets.
+  }
 }

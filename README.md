@@ -96,7 +96,8 @@ OpenAPI docs are served at `/docs` (Swagger) and `/redoc`. Key endpoints:
 | GET    | `/api/v1/routes`                  | trotro routes with current flood status   |
 | GET    | `/api/v1/routes/{id}/forecast`    | route flood forecast from rainfall        |
 | GET    | `/api/v1/alerts`                  | active route alerts                       |
-| POST   | `/api/v1/alerts/subscribe`        | subscribe a route for push alerts (auth)  |
+| POST   | `/api/v1/alerts/subscribe`        | push alerts for a route (no account needed) |
+| POST   | `/api/v1/alerts/unsubscribe`      | stop push alerts for a route              |
 | POST   | `/api/v1/reports`                 | crowdsourced flood report (persists)      |
 | GET    | `/api/v1/reports/recent`          | recent flood reports (historical + community) |
 | GET    | `/api/v1/internal/refresh`        | latest scheduled rain refresh and how it went |
