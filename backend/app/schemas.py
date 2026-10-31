@@ -163,6 +163,17 @@ class SubscribeResponse(BaseModel):
     delivers: bool = True
 
 
+class RefreshRunResponse(BaseModel):
+    """One scheduled refresh: when it ran and what it got done."""
+
+    id: int
+    started_at: dt.datetime
+    finished_at: dt.datetime | None  # None: still running, or the host died mid-run
+    rainfall_rows: int | None
+    alerts_raised: int | None
+    error: str | None
+
+
 class VapidKeyResponse(BaseModel):
     """The public half of the VAPID pair — the browser needs it to subscribe."""
 

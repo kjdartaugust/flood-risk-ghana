@@ -53,11 +53,31 @@ jobs:
           echo "::add-mask::$token"
 
           # The refresh itself runs as a background task, so the endpoint
-          # answers 202 straight away.
+          # answers 202 straight away, with the run's id.
           code=$(curl -sS -o /tmp/out.txt -w '%{http_code}' \
             --max-time 60 --retry 2 --retry-connrefused \
             -X POST "$BACKEND_URL/api/v1/internal/refresh" \
             -H "Authorization: Bearer $token")
           echo "HTTP $code"; cat /tmp/out.txt; echo
-          # 202 = accepted. Anything else is a real failure worth a red X.
+          # Anything but 202 is a real failure worth a red X.
           test "$code" = "202"
+
+          # 202 only means "started". Wait for the run to say how it ended, so
+          # a green check means rain was actually saved.
+          run=$(jq -r .run /tmp/out.txt)
+          for i in $(seq 1 30); do
+            sleep 10
+            curl -sS --max-time 30 -o /tmp/run.json \
+              "$BACKEND_URL/api/v1/internal/refresh" || continue
+            if jq -e --argjson id "$run" '.id == $id and .finished_at != null' \
+                /tmp/run.json > /dev/null; then
+              cat /tmp/run.json; echo
+              if jq -e '.error == null and .rainfall_rows > 0' /tmp/run.json > /dev/null; then
+                exit 0
+              fi
+              echo "::error::refresh $run saved no rain: $(jq -r '.error // "0 rows"' /tmp/run.json)"
+              exit 1
+            fi
+          done
+          echo "::error::refresh $run had not finished after 5 minutes"
+          exit 1

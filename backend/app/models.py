@@ -180,3 +180,25 @@ class ServerKey(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class RefreshRun(Base):
+    """One run of the scheduled rainfall + alert refresh, and how it went.
+
+    The run happens in the background after a 202, on a host whose logs may be
+    out of reach, so this row is how anyone can tell whether it saved any rain.
+    """
+
+    __tablename__ = "refresh_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    # Still None long after starting ⇒ the host died mid-run.
+    finished_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rainfall_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    alerts_raised: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)

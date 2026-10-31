@@ -42,7 +42,11 @@ async def _fetch_openmeteo(
         },
         timeout=60,
     )
-    r.raise_for_status()
+    if r.is_error:
+        # Open-Meteo says why in the body ({"reason": ...}). Keep that: the URL
+        # in a plain raise_for_status() message is just a wall of coordinates.
+        raise httpx.HTTPStatusError(f"Open-Meteo {r.status_code}: {r.text[:200]}",
+                                    request=r.request, response=r)
     data = r.json()
     # A single-point request returns an object; a batch returns a list.
     return data if isinstance(data, list) else [data]
@@ -85,6 +89,7 @@ async def refresh_rainfall(db: AsyncSession, limit_tiles: int = 400) -> int:
     )
     now = dt.datetime.now(dt.UTC)
     rows = 0
+    failures: list[str] = []
     async with httpx.AsyncClient() as client:
         for i in range(0, len(tiles), BATCH):
             chunk = tiles[i : i + BATCH]
@@ -94,6 +99,7 @@ async def refresh_rainfall(db: AsyncSession, limit_tiles: int = 400) -> int:
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("rain fetch failed for batch at %d: %s", i, e)
+                failures.append(f"{type(e).__name__}: {e}")
                 continue
             batch = [row for tile, data in zip(chunk, results, strict=False)
                      for row in _rows(tile, data, now)]
@@ -105,5 +111,10 @@ async def refresh_rainfall(db: AsyncSession, limit_tiles: int = 400) -> int:
                 await db.execute(upsert, batch)
             rows += len(batch)
         await db.commit()
+    if failures and not rows:
+        # Every fetch failed: an outage, not a dry day. Raise, so the run is
+        # recorded as failed rather than as one that just saved nothing.
+        raise RuntimeError(
+            f"rain fetch failed for all {len(failures)} batches: {failures[0]}")
     log.info("rainfall refresh: %d rows across %d tiles", rows, len(tiles))
     return rows
