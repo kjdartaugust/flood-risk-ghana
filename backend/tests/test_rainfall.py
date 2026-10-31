@@ -78,6 +78,16 @@ async def test_one_statement_per_batch_not_one_per_row():
 
 
 @pytest.mark.asyncio
+async def test_every_fetch_failing_is_an_error_not_a_dry_day(monkeypatch):
+    async def down(client, points):
+        raise rainfall.httpx.ConnectError("no route to host")
+
+    monkeypatch.setattr(rainfall, "_fetch_openmeteo", down)
+    with pytest.raises(RuntimeError, match="all 3 batches: ConnectError"):
+        await rainfall.refresh_rainfall(FakeDB(_tiles(250)))
+
+
+@pytest.mark.asyncio
 async def test_hours_split_into_observed_and_forecast():
     [tile] = _tiles(1)
     db = FakeDB([tile])

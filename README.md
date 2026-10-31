@@ -99,6 +99,7 @@ OpenAPI docs are served at `/docs` (Swagger) and `/redoc`. Key endpoints:
 | POST   | `/api/v1/alerts/subscribe`        | subscribe a route for push alerts (auth)  |
 | POST   | `/api/v1/reports`                 | crowdsourced flood report (persists)      |
 | GET    | `/api/v1/reports/recent`          | recent flood reports (historical + community) |
+| GET    | `/api/v1/internal/refresh`        | latest scheduled rain refresh and how it went |
 
 ## Live deployment
 
@@ -179,6 +180,11 @@ workflow knows where to call:
 
 With neither a repo nor `CRON_SECRET` configured, the endpoint fails closed (503).
 Trigger a run by hand from the Actions tab (**refresh → Run workflow**).
+
+The `202` only means a run started. Each run is recorded, and
+`GET /api/v1/internal/refresh` shows the latest: when it started and finished, how
+many rain rows it saved, how many alerts it raised, or the error. The workflow
+waits for that, so a green check means rain was actually saved.
 
 GitHub pauses scheduled workflows in a public repo after 60 days without a
 commit. If refreshes stop, re-enable **refresh** from the Actions tab.

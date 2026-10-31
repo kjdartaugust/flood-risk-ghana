@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -173,3 +174,38 @@ async def test_rain_refresh_upserts_and_routes_forecast_from_it(monkeypatch):
     assert points, "no route crosses a refreshed tile"
     # Updated in place: the second run's value, not a duplicate of the first.
     assert {p["precip_mm"] for p in points} == {7.0}
+
+
+def test_each_refresh_records_whether_it_saved_rain(monkeypatch):
+    """A 202 only says a run started. GET /internal/refresh must say how it
+    ended — saved rain, or failed and why."""
+    monkeypatch.setattr(settings, "cron_secret", "s3cret")
+    # The cycle loads the server's push keys into settings, as on a fresh
+    # deploy; monkeypatch puts the blanks back for the tests that follow.
+    monkeypatch.setattr(settings, "vapid_public_key", "")
+    monkeypatch.setattr(settings, "vapid_private_key", "")
+    times = [(dt.datetime.now(dt.UTC) + dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:00")
+             for h in range(-2, 4)]
+
+    async def rain(client, points):
+        return [{"hourly": {"time": times, "precipitation": [1.0] * len(times)}}
+                for _ in points]
+
+    async def down(client, points):
+        raise httpx.ConnectError("no route to host")
+
+    # The failing run re-raises after recording itself; that's the host's log.
+    lenient = TestClient(app, raise_server_exceptions=False)
+    for fetch, ok in ((rain, True), (down, False)):
+        monkeypatch.setattr(rainfall, "_fetch_openmeteo", fetch)
+        started = lenient.post("/api/v1/internal/refresh",
+                               headers={"X-Cron-Key": "s3cret"})
+        assert started.status_code == 202
+        run = client.get("/api/v1/internal/refresh").json()
+        assert run["id"] == started.json()["run"]
+        assert run["finished_at"]
+        if ok:
+            assert run["error"] is None and run["rainfall_rows"] > 0
+        else:
+            assert run["rainfall_rows"] is None
+            assert "rain fetch failed for all" in run["error"]
