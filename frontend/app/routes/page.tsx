@@ -27,7 +27,8 @@ export default function RoutesPage() {
       <p className="muted">
         Live flood status for Accra trotro corridors, combining the flood-risk
         layer with forecast rainfall. The rain forecast is checked every 3
-        hours.
+        hours. Tap “Alert me” on a route to get a notification on this phone
+        when it is likely to flood. No account needed.
       </p>
 
       {alerts && alerts.length > 0 && (

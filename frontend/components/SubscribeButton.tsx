@@ -1,8 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { PushUnavailable, enablePush, pushSupported } from "@/lib/push";
+import {
+  PushUnavailable,
+  disablePush,
+  enablePush,
+  followedRoutes,
+  pushSupported,
+  refreshPush,
+  setFollowed,
+} from "@/lib/push";
 
 // Say what actually went wrong. "Something went wrong" tells a user nothing
 // about whether to try again, change a setting, or give up.
@@ -12,32 +20,62 @@ const BLOCKED: Record<string, string> = {
   "server-off": "Push isn't switched on for this deployment yet.",
 };
 
+/** One tap, no account: this phone gets a notification if the route floods. */
 export default function SubscribeButton({ routeId }: { routeId: string }) {
-  const { session, token, configured } = useAuth();
+  // Signed in (where sign-in exists): alerts follow the account. Otherwise null.
+  const { token } = useAuth();
+  const [supported, setSupported] = useState(false);
   const [state, setState] = useState<"idle" | "working" | "on">("idle");
   const [note, setNote] = useState<string | null>(null);
 
-  if (!configured || !pushSupported()) return null;
+  // Browser-only checks wait until after mount, so the server-rendered HTML
+  // and the first client render agree.
+  useEffect(() => {
+    setSupported(pushSupported());
+    if (!followedRoutes().has(routeId)) return;
+    setState("on");
+    refreshPush(routeId, token)
+      .then((stillOn) => {
+        if (!stillOn) {
+          setFollowed(routeId, false);
+          setState("idle");
+        }
+      })
+      // Offline or the server is waking up: keep showing "on", retry next visit.
+      .catch(() => {});
+  }, [routeId, token]);
 
-  if (!session) {
-    return <span className="muted sub-hint">Sign in to get alerts</span>;
-  }
+  if (!supported) return null;
 
-  async function subscribe() {
+  async function toggle() {
+    const wasOn = state === "on";
     setState("working");
     setNote(null);
     try {
-      const res = await enablePush(routeId, token!);
+      if (wasOn) {
+        await disablePush(routeId, token);
+        setFollowed(routeId, false);
+        setState("idle");
+        return;
+      }
+      const res = await enablePush(routeId, token);
+      setFollowed(routeId, true);
       setState("on");
       // The server stored the subscription but has no VAPID keys, so nothing
       // will actually arrive. Better to admit that than fake a green tick.
-      if (!res.delivers) setNote("Saved — but the server can't send pushes yet.");
+      setNote(
+        res.delivers
+          ? "You'll get a notification if this route is likely to flood. Tap again to stop."
+          : "Saved — but the server can't send pushes yet."
+      );
     } catch (e) {
-      setState("idle");
+      setState(wasOn ? "on" : "idle");
       setNote(
         e instanceof PushUnavailable
           ? BLOCKED[e.reason]
-          : "Couldn't subscribe. Try again."
+          : wasOn
+            ? "Couldn't stop alerts. Try again."
+            : "Couldn't subscribe. Try again."
       );
     }
   }
@@ -46,13 +84,14 @@ export default function SubscribeButton({ routeId }: { routeId: string }) {
     <div className="sub">
       <button
         className="btn ghost sm"
-        onClick={subscribe}
-        disabled={state !== "idle"}
+        onClick={toggle}
+        disabled={state === "working"}
+        aria-pressed={state === "on"}
       >
         {state === "on"
           ? "🔔 Alerts on"
           : state === "working"
-            ? "Subscribing…"
+            ? "One moment…"
             : "🔔 Alert me"}
       </button>
       {note && <span className="muted sub-hint">{note}</span>}

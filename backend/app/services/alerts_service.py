@@ -12,9 +12,10 @@ product, and `GET /alerts` serves it whether or not any push got through.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import logging
 
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AlertSubscription, RouteAlert, TrotroRoute
@@ -113,8 +114,22 @@ async def list_active_alerts(db: AsyncSession) -> list[AlertResponse]:
     ) for r in rows]
 
 
+def push_subscriber_id(endpoint: str) -> str:
+    """Who a subscriber without an account is: their browser's push endpoint.
+
+    Riders get alerts without signing up, so the endpoint stands in for the
+    account. It's hashed, prefixed and cut to fit `user_id` (64 chars), so it
+    can never collide with a Supabase user id.
+    """
+    return "push:" + hashlib.sha256(endpoint.encode()).hexdigest()[:59]
+
+
 async def subscribe(db: AsyncSession, user_id: str,
                     req: SubscribeRequest) -> SubscribeResponse:
+    # Now that anyone can subscribe, an unknown route is a 404, not a foreign
+    # key violation surfacing as a 500.
+    if await db.get(TrotroRoute, req.route_id) is None:
+        raise LookupError(f"no route {req.route_id}")
     handle = req.push_subscription.model_dump() if req.push_subscription else None
     # Only promise a notification we can actually deliver.
     delivers = push_enabled() if req.channel == "push" else True
@@ -144,3 +159,14 @@ async def subscribe(db: AsyncSession, user_id: str,
     return SubscribeResponse(id=sub.id, route_id=req.route_id,
                              channel=req.channel, created=True,
                              delivers=delivers)
+
+
+async def unsubscribe(db: AsyncSession, user_id: str, route_id: str) -> bool:
+    """Stop push alerts for a route. True if there was something to stop."""
+    result = await db.execute(delete(AlertSubscription).where(
+        AlertSubscription.user_id == user_id,
+        AlertSubscription.route_id == route_id,
+        AlertSubscription.channel == "push",
+    ))
+    await db.commit()
+    return result.rowcount > 0

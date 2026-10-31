@@ -126,8 +126,13 @@ export const api = {
   alerts: () => get<Alert[]>(`/alerts`),
   /** 503 when the server has no VAPID keys — push is simply off. */
   vapidKey: () => get<{ public_key: string }>(`/alerts/vapid-key`),
-  subscribe: (body: SubscribeRequest, token: string) =>
+  /** No account needed for push: the push subscription itself is the identity. */
+  subscribe: (body: SubscribeRequest, token?: string | null) =>
     post<SubscribeResponse>(`/alerts/subscribe`, body, token),
+  unsubscribe: (
+    body: { route_id: string; endpoint: string },
+    token?: string | null
+  ) => post<{ removed: boolean }>(`/alerts/unsubscribe`, body, token),
   reportFlood: (r: {
     lat: number;
     lng: number;
