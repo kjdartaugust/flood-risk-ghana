@@ -161,6 +161,35 @@ async def subscribe(db: AsyncSession, user_id: str,
                              delivers=delivers)
 
 
+async def send_test(db: AsyncSession, user_id: str, route_id: str) -> int | None:
+    """Push a test notification to this subscriber's alert for a route, by the
+    same path a real alert takes: the stored subscription, our VAPID signature,
+    the push service, the service worker. So a rider sees it work today instead
+    of finding out in the first storm. Returns `send_push`'s result (None =
+    delivered); LookupError if they don't follow the route.
+    """
+    sub = (await db.execute(select(AlertSubscription).where(
+        AlertSubscription.user_id == user_id,
+        AlertSubscription.route_id == route_id,
+        AlertSubscription.channel == "push",
+    ))).scalar_one_or_none()
+    if sub is None or not sub.push_subscription:
+        raise LookupError("this browser doesn't follow that route")
+    route = await db.get(TrotroRoute, route_id)
+    status = await send_push(sub.push_subscription, {
+        "title": "FloodWatch: alerts are on",
+        "body": f"You'll get a notification like this if {route.name} "
+                "is likely to flood.",
+        "level": "test",
+        "route_id": route_id,
+        "url": "/routes",
+    })
+    if is_gone(status):
+        await db.delete(sub)
+        await db.commit()
+    return status
+
+
 async def unsubscribe(db: AsyncSession, user_id: str, route_id: str) -> bool:
     """Stop push alerts for a route. True if there was something to stop."""
     result = await db.execute(delete(AlertSubscription).where(

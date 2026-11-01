@@ -63,6 +63,12 @@ export interface SubscribeResponse {
   delivers: boolean;
 }
 
+export interface TestAlertResult {
+  sent: boolean;
+  /** The push service's refusal, if any. 404/410: the browser dropped it. */
+  status: number | null;
+}
+
 export interface FloodReport {
   id: string;
   lat: number;
@@ -133,6 +139,11 @@ export const api = {
     body: { route_id: string; endpoint: string },
     token?: string | null
   ) => post<{ removed: boolean }>(`/alerts/unsubscribe`, body, token),
+  /** A real push to this browser's subscription for the route, right now. */
+  testAlert: (
+    body: { route_id: string; endpoint: string },
+    token?: string | null
+  ) => post<TestAlertResult>(`/alerts/test`, body, token),
   reportFlood: (r: {
     lat: number;
     lng: number;

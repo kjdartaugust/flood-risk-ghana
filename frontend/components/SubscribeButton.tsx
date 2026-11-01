@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   PushUnavailable,
@@ -9,6 +10,7 @@ import {
   followedRoutes,
   pushSupported,
   refreshPush,
+  sendTestPush,
   setFollowed,
 } from "@/lib/push";
 
@@ -47,6 +49,33 @@ export default function SubscribeButton({ routeId }: { routeId: string }) {
 
   if (!supported) return null;
 
+  /** A real notification now, instead of a promise that one will come. */
+  async function test(): Promise<"sent" | "dropped" | "failed"> {
+    try {
+      const r = await sendTestPush(routeId, token);
+      if (r.sent) return "sent";
+      // The push service says this browser let the subscription go.
+      if (r.status === 404 || r.status === 410) return "dropped";
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return "dropped";
+    }
+    return "failed";
+  }
+
+  function report(result: "sent" | "dropped" | "failed", sentNote: string) {
+    if (result === "dropped") {
+      setFollowed(routeId, false);
+      setState("idle");
+      setNote("This phone stopped receiving alerts. Tap Alert me to turn them back on.");
+      return;
+    }
+    setNote(
+      result === "sent"
+        ? sentNote
+        : "The test notification didn't go through. Try Send a test later."
+    );
+  }
+
   async function toggle() {
     const wasOn = state === "on";
     setState("working");
@@ -63,10 +92,13 @@ export default function SubscribeButton({ routeId }: { routeId: string }) {
       setState("on");
       // The server stored the subscription but has no VAPID keys, so nothing
       // will actually arrive. Better to admit that than fake a green tick.
-      setNote(
-        res.delivers
-          ? "You'll get a notification if this route is likely to flood. Tap again to stop."
-          : "Saved — but the server can't send pushes yet."
+      if (!res.delivers) {
+        setNote("Saved — but the server can't send pushes yet.");
+        return;
+      }
+      report(
+        await test(),
+        "A test notification is on its way. Real ones come if this route is likely to flood. Tap Alerts on to stop."
       );
     } catch (e) {
       setState(wasOn ? "on" : "idle");
@@ -78,6 +110,11 @@ export default function SubscribeButton({ routeId }: { routeId: string }) {
             : "Couldn't subscribe. Try again."
       );
     }
+  }
+
+  async function sendTest() {
+    setNote("Sending a test…");
+    report(await test(), "Sent. It should pop up in a few seconds.");
   }
 
   return (
@@ -94,6 +131,11 @@ export default function SubscribeButton({ routeId }: { routeId: string }) {
             ? "One moment…"
             : "🔔 Alert me"}
       </button>
+      {state === "on" && (
+        <button className="btn ghost sm" onClick={sendTest}>
+          Send a test
+        </button>
+      )}
       {note && <span className="muted sub-hint">{note}</span>}
     </div>
   );

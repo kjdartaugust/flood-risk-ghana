@@ -11,6 +11,8 @@ from app.schemas import (
     AlertResponse,
     SubscribeRequest,
     SubscribeResponse,
+    TestAlertRequest,
+    TestAlertResponse,
     UnsubscribeRequest,
     UnsubscribeResponse,
     VapidKeyResponse,
@@ -86,3 +88,24 @@ async def unsubscribe(
 ) -> UnsubscribeResponse:
     removed = await svc.unsubscribe(db, _subscriber(user, req.endpoint), req.route_id)
     return UnsubscribeResponse(removed=removed)
+
+
+@router.post("/test", response_model=TestAlertResponse,
+             summary="Send this browser a test alert for a route it follows")
+async def send_test_alert(
+    req: TestAlertRequest,
+    user: Principal | None = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TestAlertResponse:
+    """Only ever reaches a subscription the caller already holds: the push
+    endpoint is the proof, and it must already be stored for the route."""
+    if not push_enabled():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "push notifications are not configured on this server",
+        )
+    try:
+        refused = await svc.send_test(db, _subscriber(user, req.endpoint), req.route_id)
+    except LookupError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    return TestAlertResponse(sent=refused is None, status=refused)

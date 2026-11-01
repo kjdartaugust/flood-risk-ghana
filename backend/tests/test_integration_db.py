@@ -24,7 +24,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.etl import rainfall
 from app.main import app
-from app.services import push
+from app.services import alerts_service, push
 
 
 def _db_available() -> bool:
@@ -40,6 +40,9 @@ def _db_available() -> bool:
     except Exception:
         return False
 
+
+# Shaped like a browser's: a real P-256 point and a 16-byte auth secret.
+BROWSER_KEYS = {"p256dh": push.generate_keys()[0], "auth": "AAAAAAAAAAAAAAAAAAAAAA"}
 
 pytestmark = pytest.mark.skipif(
     not _db_available(), reason="no live PostGIS (integration test)"
@@ -114,7 +117,7 @@ def test_anyone_can_subscribe_a_route_for_push_and_stop():
     for stopping. An unknown route is a 404, not a 500."""
     route_id = client.get("/api/v1/routes").json()[0]["id"]
     sub = {"endpoint": f"https://fcm.googleapis.com/fcm/send/it-{uuid.uuid4()}",
-           "keys": {"p256dh": "BPk...", "auth": "k9..."}}
+           "keys": BROWSER_KEYS}
     body = {"route_id": route_id, "channel": "push", "push_subscription": sub}
 
     first = client.post("/api/v1/alerts/subscribe", json=body)
@@ -129,6 +132,36 @@ def test_anyone_can_subscribe_a_route_for_push_and_stop():
     for removed in (True, False):
         r = client.post("/api/v1/alerts/unsubscribe", json=stop)
         assert r.json() == {"removed": removed}
+
+
+def test_test_alert_reaches_the_stored_subscription_and_prunes_a_dead_one(monkeypatch):
+    """The test takes the real path from the stored row; if the push service
+    says the browser dropped it, the row goes."""
+    route = client.get("/api/v1/routes").json()[0]
+    sub = {"endpoint": f"https://fcm.googleapis.com/fcm/send/it-{uuid.uuid4()}",
+           "keys": BROWSER_KEYS}
+    client.post("/api/v1/alerts/subscribe", json={
+        "route_id": route["id"], "channel": "push", "push_subscription": sub})
+
+    pushed = []
+    replies = iter([None, 410])
+
+    async def push_service(handle, payload):
+        pushed.append((handle["endpoint"], payload))
+        return next(replies)
+
+    monkeypatch.setattr(alerts_service, "send_push", push_service)
+    monkeypatch.setattr("app.api.routes.alerts.push_enabled", lambda: True)
+    ask = {"route_id": route["id"], "endpoint": sub["endpoint"]}
+
+    assert client.post("/api/v1/alerts/test", json=ask).json() == {
+        "sent": True, "status": None}
+    endpoint, payload = pushed[0]
+    assert endpoint == sub["endpoint"] and route["name"] in payload["body"]
+
+    assert client.post("/api/v1/alerts/test", json=ask).json() == {
+        "sent": False, "status": 410}
+    assert client.post("/api/v1/alerts/test", json=ask).status_code == 404
 
 
 def test_flood_report_persists_end_to_end():

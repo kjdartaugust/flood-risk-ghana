@@ -1,6 +1,6 @@
 "use client";
 
-import { ApiError, api, SubscribeResponse } from "./api";
+import { ApiError, api, SubscribeResponse, TestAlertResult } from "./api";
 
 /** Why push isn't available — each maps to a different thing to tell the user. */
 export type PushBlocker =
@@ -108,6 +108,21 @@ export async function disablePush(
   if (!pushSupported()) return;
   const sub = await currentSubscription();
   if (sub) await api.unsubscribe({ route_id: routeId, endpoint: sub.endpoint }, token);
+}
+
+/**
+ * Ask the server for a test alert on a route this browser follows: a real
+ * push, by the same path a flood warning takes. A 404 (as ApiError) means this
+ * browser isn't subscribed any more.
+ */
+export async function sendTestPush(
+  routeId: string,
+  token?: string | null
+): Promise<TestAlertResult> {
+  if (!pushSupported()) throw new PushUnavailable("unsupported");
+  const sub = await currentSubscription();
+  if (!sub) throw new ApiError(404, "this browser has no push subscription");
+  return api.testAlert({ route_id: routeId, endpoint: sub.endpoint }, token);
 }
 
 /**

@@ -1,9 +1,12 @@
 """Pydantic request/response models (API contract → OpenAPI)."""
 from __future__ import annotations
 
+import base64
+import binascii
 import datetime as dt
 from urllib.parse import urlsplit
 
+from cryptography.hazmat.primitives.asymmetric import ec
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -135,7 +138,25 @@ class PushSubscription(BaseModel):
         missing = {"p256dh", "auth"} - v.keys()
         if missing:
             raise ValueError(f"push keys missing: {', '.join(sorted(missing))}")
+        # What every browser sends (RFC 8291): a P-256 public point and a
+        # 16-byte secret. Anyone can subscribe now, and keys we can't encrypt
+        # to would only fail later, in the middle of someone's alert run.
+        try:
+            ec.EllipticCurvePublicKey.from_encoded_point(
+                ec.SECP256R1(), _b64url(v["p256dh"]))
+        except ValueError:
+            raise ValueError("push key p256dh is not a P-256 public key") from None
+        if len(_b64url(v["auth"])) != 16:
+            raise ValueError("push key auth is not a 16-byte secret")
         return v
+
+
+def _b64url(value: str) -> bytes:
+    """Decode unpadded base64url, the encoding push keys come in; b"" if invalid."""
+    try:
+        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except (binascii.Error, ValueError):
+        return b""
 
 
 class SubscribeRequest(BaseModel):
@@ -160,6 +181,18 @@ class UnsubscribeRequest(BaseModel):
 
 class UnsubscribeResponse(BaseModel):
     removed: bool
+
+
+class TestAlertRequest(BaseModel):
+    route_id: str
+    endpoint: str = Field(min_length=1, max_length=1000)
+
+
+class TestAlertResponse(BaseModel):
+    sent: bool
+    # The push service's HTTP status when it refused; 404/410 mean the browser
+    # dropped this subscription, so it has been removed.
+    status: int | None = None
 
 
 class SubscribeResponse(BaseModel):
