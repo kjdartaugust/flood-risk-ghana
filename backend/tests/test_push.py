@@ -15,8 +15,9 @@ from app.models import AlertSubscription, RouteAlert
 from app.schemas import SubscribeRequest
 from app.services import alerts_service, push
 
+# Shaped like a browser's: a real P-256 point and a 16-byte auth secret.
 SUB = {"endpoint": "https://fcm.googleapis.com/fcm/send/abc",
-       "keys": {"p256dh": "BPk...", "auth": "k9..."}}
+       "keys": {"p256dh": push.generate_keys()[0], "auth": "AAAAAAAAAAAAAAAAAAAAAA"}}
 
 
 class FakeDB:
@@ -129,6 +130,33 @@ def test_push_subscription_needs_its_encryption_keys():
         SubscribeRequest(route_id="r1", channel="push",
                          push_subscription={"endpoint": "https://x",
                                             "keys": {"p256dh": "B..."}})
+
+
+def test_push_keys_must_be_a_browsers():
+    """Anyone can subscribe, so keys we couldn't encrypt to are refused up front."""
+    for keys in ({"p256dh": "BPk...", "auth": SUB["keys"]["auth"]},
+                 {"p256dh": SUB["keys"]["p256dh"], "auth": "k9..."}):
+        with pytest.raises(ValidationError, match="push key"):
+            SubscribeRequest(route_id="r1", channel="push",
+                             push_subscription={**SUB, "keys": keys})
+
+
+@pytest.mark.asyncio
+async def test_a_broken_subscription_cannot_stop_an_alert_run(monkeypatch):
+    """Junk keys raise binascii.Error, not WebPushException, and an unreachable
+    push service raises a requests error. Both must come back as a failed send,
+    never as an exception in the middle of evaluate_and_raise_alerts."""
+    pub, priv = push.generate_keys()
+    monkeypatch.setattr(settings, "vapid_public_key", pub)
+    monkeypatch.setattr(settings, "vapid_private_key", priv)
+    junk = {**SUB, "keys": {"p256dh": "check", "auth": "check"}}
+    assert await push.send_push(junk, {"title": "x"}) == push.DISABLED
+
+    def unreachable(**kwargs):
+        raise ConnectionError("no route to fcm.googleapis.com")
+
+    monkeypatch.setattr(push, "webpush", unreachable)
+    assert await push.send_push(SUB, {"title": "x"}) == push.DISABLED
 
 
 def test_push_endpoint_must_be_a_browser_push_service():

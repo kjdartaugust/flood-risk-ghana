@@ -78,6 +78,14 @@ def _send(sub: dict[str, Any], payload: dict[str, Any]) -> int | None:
         if not is_gone(status):
             log.warning("web push failed (status=%s): %s", status, exc)
         return status
+    except Exception:
+        # Not every failure arrives as a WebPushException: keys that aren't
+        # valid base64 raise binascii.Error, an unreachable push service a
+        # requests error. Delivery fails open, so one bad subscription can't
+        # stop an alert run for everyone else.
+        log.warning("web push failed before reaching the push service",
+                    exc_info=True)
+        return DISABLED
 
 
 async def send_push(sub: dict[str, Any], payload: dict[str, Any]) -> int | None:

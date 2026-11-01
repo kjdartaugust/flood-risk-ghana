@@ -11,10 +11,10 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.schemas import SubscribeResponse
-from app.services import alerts_service
+from app.services import alerts_service, push
 
 SUB = {"endpoint": "https://fcm.googleapis.com/fcm/send/abc",
-       "keys": {"p256dh": "BPk...", "auth": "k9..."}}
+       "keys": {"p256dh": push.generate_keys()[0], "auth": "AAAAAAAAAAAAAAAAAAAAAA"}}
 RIDER = alerts_service.push_subscriber_id(SUB["endpoint"])
 
 
@@ -67,3 +67,30 @@ def test_stopping_alerts_also_goes_by_push_endpoint(client, calls):
                     json={"route_id": "r1", "endpoint": SUB["endpoint"]})
     assert r.status_code == 200 and r.json() == {"removed": True}
     assert calls == [("unsubscribe", RIDER, "r1")]
+
+
+def test_a_test_alert_goes_to_the_callers_own_subscription(client, monkeypatch):
+    sent = []
+
+    async def send_test(db, user_id, route_id):
+        if route_id != "r1":
+            raise LookupError("this browser doesn't follow that route")
+        sent.append((user_id, route_id))
+        return None
+
+    monkeypatch.setattr(alerts_service, "send_test", send_test)
+    monkeypatch.setattr("app.api.routes.alerts.push_enabled", lambda: True)
+    ask = {"route_id": "r1", "endpoint": SUB["endpoint"]}
+    r = client.post("/api/v1/alerts/test", json=ask)
+    assert r.status_code == 200 and r.json() == {"sent": True, "status": None}
+    assert sent == [(RIDER, "r1")]
+    # A route this browser doesn't follow: nothing to send to.
+    r = client.post("/api/v1/alerts/test", json={**ask, "route_id": "r2"})
+    assert r.status_code == 404
+
+
+def test_no_test_alert_promised_when_push_is_off(client, monkeypatch):
+    monkeypatch.setattr("app.api.routes.alerts.push_enabled", lambda: False)
+    r = client.post("/api/v1/alerts/test",
+                    json={"route_id": "r1", "endpoint": SUB["endpoint"]})
+    assert r.status_code == 503
