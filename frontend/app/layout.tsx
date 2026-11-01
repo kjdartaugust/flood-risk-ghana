@@ -1,38 +1,39 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import AuthButton from "@/components/AuthButton";
+import type { Metadata, Viewport } from "next";
+import SiteHeader from "@/components/SiteHeader";
 import { AuthProvider } from "@/lib/auth";
-import "./globals.css";
+// MapLibre's styles first, so ours can override them.
 import "maplibre-gl/dist/maplibre-gl.css";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FloodWatch Ghana",
+  title: {
+    default: "FloodWatch Ghana — will it flood here?",
+    template: "%s · FloodWatch Ghana",
+  },
   description:
-    "Flood-risk scoring for Ghana + trotro route flood alerts. Check before you buy, build, or travel.",
+    "Check the flood risk of any place in Accra before you buy, build or rent, and get a phone alert before your trotro route floods.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  // The on-screen keyboard pushes the search sheet up instead of covering it.
+  interactiveWidget: "resizes-content",
+  colorScheme: "light dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f4f6f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0e15" },
+  ],
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
         <AuthProvider>
-          <div className="app">
-            <header className="topbar">
-              <span className="logo">🌊</span>
-              <h1>FloodWatch Ghana</h1>
-              <nav>
-                <Link href="/">Risk Map</Link>
-                <Link href="/routes">Trotro Alerts</Link>
-                <Link href="/about">About</Link>
-              </nav>
-              <AuthButton />
-            </header>
-            {children}
-          </div>
+          <SiteHeader />
+          {children}
         </AuthProvider>
       </body>
     </html>

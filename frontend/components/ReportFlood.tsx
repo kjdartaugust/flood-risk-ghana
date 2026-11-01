@@ -3,6 +3,15 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 
+// Depth in words people use, mapped onto the API's 1–5 severity.
+const DEPTHS = [
+  { severity: 1, label: "Puddles" },
+  { severity: 2, label: "Ankle-deep" },
+  { severity: 3, label: "Knee-deep" },
+  { severity: 4, label: "Waist-deep" },
+  { severity: 5, label: "Deeper" },
+];
+
 // The end-to-end write action: persists a community flood report to the DB and
 // asks the parent to re-score the point so the effect is visible immediately.
 export default function ReportFlood({
@@ -14,57 +23,68 @@ export default function ReportFlood({
   lng: number;
   onReported: () => void;
 }) {
-  const [severity, setSeverity] = useState(3);
-  const [state, setState] = useState<"idle" | "sending" | "done" | "error">(
-    "idle"
-  );
-  const [msg, setMsg] = useState("");
+  const [open, setOpen] = useState(false);
+  const [severity, setSeverity] = useState<number | null>(null);
+  const [state, setState] = useState<"idle" | "sending" | "done" | "error">("idle");
 
   async function submit() {
+    if (severity === null) return;
     setState("sending");
     try {
-      const r = await api.reportFlood({ lat, lng, severity });
-      setMsg(`Saved report #${r.id.slice(0, 8)} in ${r.area_name}.`);
+      await api.reportFlood({ lat, lng, severity });
       setState("done");
       onReported();
-    } catch (e) {
-      setMsg((e as Error).message);
+    } catch {
       setState("error");
     }
   }
 
-  return (
-    <div className="card">
-      <h3>Report flooding here</h3>
-      <p className="muted" style={{ marginBottom: 8 }}>
-        Seen flooding at this spot? Add a community report — it persists and
-        raises the local risk score.
+  if (state === "done") {
+    return (
+      <p className="report-done" role="status">
+        Thanks. Your report is saved and now counts toward this spot&apos;s risk.
       </p>
-      <label className="muted" style={{ fontSize: 13 }}>
-        Severity: <strong>{severity}</strong>/5
-      </label>
-      <input
-        type="range"
-        min={1}
-        max={5}
-        value={severity}
-        onChange={(e) => setSeverity(Number(e.target.value))}
-        style={{ width: "100%", margin: "8px 0" }}
-      />
-      <button
-        className="btn"
-        onClick={submit}
-        disabled={state === "sending"}
-        style={{ width: "100%" }}
-      >
-        {state === "sending" ? "Saving…" : "Submit report"}
+    );
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="report-toggle" onClick={() => setOpen(true)}>
+        Seen flooding here? Tell us
       </button>
-      {state === "done" && (
-        <p style={{ color: "#4ade80", fontSize: 13, marginTop: 8 }}>✓ {msg}</p>
-      )}
+    );
+  }
+
+  return (
+    <section className="report" aria-label="Report flooding here">
+      <h3>How deep did it get?</h3>
+      <div className="depths" role="radiogroup" aria-label="Flood depth">
+        {DEPTHS.map((d) => (
+          <button
+            key={d.severity}
+            type="button"
+            role="radio"
+            aria-checked={severity === d.severity}
+            className={severity === d.severity ? "chip selected" : "chip"}
+            onClick={() => setSeverity(d.severity)}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="btn block"
+        onClick={submit}
+        disabled={severity === null || state === "sending"}
+      >
+        {state === "sending" ? "Saving…" : "Send report"}
+      </button>
       {state === "error" && (
-        <p style={{ color: "#f87171", fontSize: 13, marginTop: 8 }}>{msg}</p>
+        <p className="form-error" role="alert">
+          Couldn&apos;t save that. Check your connection and try again.
+        </p>
       )}
-    </div>
+    </section>
   );
 }

@@ -13,6 +13,7 @@ import {
   sendTestPush,
   setFollowed,
 } from "@/lib/push";
+import { BellIcon } from "./icons";
 
 // Say what actually went wrong. "Something went wrong" tells a user nothing
 // about whether to try again, change a setting, or give up.
@@ -125,11 +126,8 @@ export default function SubscribeButton({ routeId }: { routeId: string }) {
         disabled={state === "working"}
         aria-pressed={state === "on"}
       >
-        {state === "on"
-          ? "🔔 Alerts on"
-          : state === "working"
-            ? "One moment…"
-            : "🔔 Alert me"}
+        {state !== "working" && <BellIcon size={16} />}
+        {state === "on" ? "Alerts on" : state === "working" ? "One moment…" : "Alert me"}
       </button>
       {state === "on" && (
         <button className="btn ghost sm" onClick={sendTest}>

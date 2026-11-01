@@ -120,6 +120,8 @@ const post = <T,>(path: string, body: unknown, token?: string | null) =>
   );
 
 export const api = {
+  /** Slow only when the free server is waking from sleep (about a minute). */
+  health: () => get<{ status: string; db: boolean }>(`/health`),
   riskPoint: (lat: number, lng: number) =>
     get<RiskPoint>(`/risk/point?lat=${lat}&lng=${lng}`),
   riskArea: (name: string) =>
@@ -154,13 +156,5 @@ export const api = {
     get<FloodReport[]>(`/reports/recent?limit=${limit}`),
 };
 
-export const BAND_COLOR: Record<Band, string> = {
-  none: "#64748b",
-  low: "#2dc937",
-  moderate: "#a8c700",
-  high: "#e7b416",
-  severe: "#db7b2b",
-  extreme: "#cc3232",
-};
 
 export const fetcher = (path: string) => get(path);
