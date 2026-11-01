@@ -1,43 +1,62 @@
+import type { Metadata } from "next";
+
+export const metadata: Metadata = { title: "How it works" };
+
 export default function AboutPage() {
   return (
-    <div className="page">
-      <h2>About FloodWatch Ghana</h2>
-      <p className="muted">
-        FloodWatch estimates flood risk for any location in Ghana so people can
-        check before buying land, building, renting, or starting a business — and
-        warns trotro commuters which routes flood before and during rain.
-      </p>
-
-      <div className="card">
-        <h3>How the score works</h3>
-        <p className="muted">
-          Each ~0.7 km² H3 hex cell is scored from six drivers: low elevation,
-          flat slope / poor runoff, poor drainage, imperviousness (built-up land),
-          density of historical flooding nearby, and recent rainfall. A transparent
-          weighted model gives the baseline; a gradient-boosted classifier upgrades
-          it as labelled data grows. Every score ships with a confidence value.
+    <main className="page">
+      <header className="page-head">
+        <p className="eyebrow">About</p>
+        <h1>How FloodWatch works</h1>
+        <p className="lede">
+          FloodWatch estimates how likely a place in Accra is to flood, so you can check before
+          you buy land, build or rent. It also warns trotro riders before their route floods.
         </p>
-      </div>
+      </header>
 
-      <div className="card">
-        <h3>Data sources</h3>
-        <ul className="muted">
-          <li>NASA GPM/IMERG &amp; Open-Meteo — rainfall (observed + forecast)</li>
-          <li>Copernicus / SRTM DEM — elevation, slope, drainage</li>
-          <li>Sentinel-2 land cover — imperviousness</li>
-          <li>OpenStreetMap — roads and trotro routes</li>
-          <li>NADMO / Ghana Meteo &amp; reported events — historical floods</li>
+      <section className="card">
+        <h2>The score</h2>
+        <p>
+          Accra is split into hexagons about 900 m across. Each gets a score from 0 to 100 from
+          how low the ground sits compared with the rest of the city, how built-up it is, and
+          where floods have been reported. A statistical model trained on past floods weighs
+          these together.
+        </p>
+        <p>
+          It&apos;s a guide, not a guarantee. Tested on neighbourhoods it had never seen, it
+          ranks a flooded place above a dry one about 6 times in 10: better than chance, and we
+          would rather say so than oversell it.
+        </p>
+      </section>
+
+      <section className="card">
+        <h2>Trotro alerts</h2>
+        <p>
+          Every 3 hours FloodWatch fetches the rain forecast for the next day or two. Where heavy
+          rain meets a route&apos;s low points, the route is flagged, and every phone that asked
+          for alerts gets a notification. No account and no phone number: the alert goes to the
+          browser that asked for it.
+        </p>
+      </section>
+
+      <section className="card">
+        <h2>Where the data comes from</h2>
+        <ul>
+          <li>Ground height: Copernicus DEM, via Open-Meteo</li>
+          <li>Streams, drains, buildings and trotro routes: OpenStreetMap</li>
+          <li>Rain, observed and forecast: Open-Meteo</li>
+          <li>Past floods: public reports of the 3 June 2015 Accra flood</li>
+          <li>Map: OpenFreeMap. Place search: Photon by Komoot. Both use OpenStreetMap.</li>
         </ul>
-      </div>
+      </section>
 
-      <div className="card">
-        <h3>Disclaimer</h3>
-        <p className="muted">
-          Risk scores are probabilistic estimates for planning support only, not a
-          guarantee. Always consult NADMO and local authorities for emergency
-          decisions.
+      <section className="card">
+        <h2>Please note</h2>
+        <p>
+          Scores are estimates to help you plan, not a guarantee. In an emergency, follow NADMO
+          and local authorities.
         </p>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
