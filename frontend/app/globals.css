@@ -23,6 +23,7 @@
   --brand: #0a66ff;
   --brand-soft: rgba(10, 102, 255, 0.12);
   --map-bg: #f2f2ef;
+  --rain: #3b82f6;
 
   --ok-soft: #e6f6ea;
   --ok-ink: #1e7a34;
@@ -59,6 +60,7 @@
     --brand: #4d8dff;
     --brand-soft: rgba(77, 141, 255, 0.16);
     --map-bg: #0e1116;
+    --rain: #60a5fa;
 
     --ok-soft: rgba(47, 158, 68, 0.16);
     --ok-ink: #69db7c;
@@ -352,6 +354,23 @@ h3 {
 .legend-scale {
   display: flex;
   justify-content: space-between;
+}
+
+.legend-route {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.legend-route i {
+  width: 18px;
+  height: 4px;
+  border-radius: 99px;
+  background: #0a66ff;
+  box-shadow: 0 0 0 1.5px var(--surface);
 }
 
 @media (min-width: 900px) {
@@ -1317,6 +1336,147 @@ h3 {
   margin: 4px 0 6px;
   color: var(--text-2);
   font-size: 14.5px;
+  line-height: 1.5;
+}
+
+.route-top .tag {
+  margin-left: auto;
+}
+
+/* The same card inside the map's panel: no box, just a section. */
+.route-card.in-sheet {
+  min-height: 0;
+  margin-top: 18px;
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: rise 0.35s var(--ease);
+}
+
+.route-card.in-sheet h2 {
+  font-size: 24px;
+}
+
+.route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.route-actions .sub {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.freshness::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ── Rain strip: the coming hours at a glance ───────────────────────────── */
+
+.route-rain {
+  margin-top: 10px;
+}
+
+.route-rain-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.route-rain-head h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.route-rain-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rain-bars,
+.rain-axis {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+}
+
+.rain-bars {
+  align-items: end;
+  height: 60px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--fill);
+}
+
+.rain-col {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+}
+
+.rain-bar {
+  width: 100%;
+  min-height: 3px;
+  border-radius: 4px 4px 2px 2px;
+  background: var(--rain);
+}
+
+.rain-bar.watch {
+  background: #e0a400;
+}
+
+.rain-bar.warning {
+  background: #f76707;
+}
+
+.rain-bar.severe {
+  background: #e03131;
+}
+
+.rain-axis {
+  padding: 5px 6px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Labels sit on every third hour and spill into the empty columns after. */
+.rain-axis span {
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.rain-summary {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
   line-height: 1.5;
 }
 
