@@ -55,6 +55,14 @@ class RiskTilesResponse(BaseModel):
     features: list[dict]  # GeoJSON features
 
 
+class RouteHour(BaseModel):
+    """One forecast hour on a route: the wettest cell it crosses."""
+
+    at: dt.datetime
+    precip_mm: float
+    status: str  # clear | watch | warning | severe
+
+
 class RouteSummary(BaseModel):
     id: str
     name: str
@@ -63,6 +71,10 @@ class RouteSummary(BaseModel):
     baseline_risk: float
     current_status: str  # clear | watch | warning | severe
     active_alert: bool
+    # The line to draw, as [lng, lat] pairs (GeoJSON order).
+    path: list[tuple[float, float]] = []
+    # The coming hours of forecast rain — what `current_status` was judged on.
+    hours: list[RouteHour] = []
 
 
 class RouteForecastPoint(BaseModel):

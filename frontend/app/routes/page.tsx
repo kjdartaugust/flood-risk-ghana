@@ -1,29 +1,15 @@
 "use client";
 
 import useSWR from "swr";
-import SubscribeButton from "@/components/SubscribeButton";
+import RouteCard from "@/components/RouteCard";
 import WakeNotice from "@/components/WakeNotice";
 import { Alert, api, RouteSummary } from "@/lib/api";
+import { useRainCheck } from "@/lib/useRainCheck";
 import { useServer } from "@/lib/useServer";
-
-// What each status means for someone about to board, in their words.
-const STATUS: Record<RouteSummary["current_status"], { label: string; line: string }> = {
-  clear: { label: "Clear", line: "No flooding expected in the next 12 hours." },
-  watch: { label: "Watch", line: "Rain on the way. Minor flooding possible, so allow extra time." },
-  warning: { label: "Warning", line: "Flooding likely at low points. Expect delays." },
-  severe: { label: "Severe", line: "Severe flooding expected. Avoid the peak if you can." },
-};
-
-/** What the route is like in heavy rain, whatever today's forecast says. Was a
- * bare "Baseline risk 97/100" beside "Clear", which read as a contradiction. */
-function usually(baseline: number): string {
-  if (baseline >= 60) return "Passes known flood spots";
-  if (baseline >= 40) return "Has some low points";
-  return "Mostly high ground";
-}
 
 export default function RoutesPage() {
   const server = useServer();
+  const checked = useRainCheck();
   const { data: routes, error } = useSWR<RouteSummary[]>("routes", () => api.routes(), {
     refreshInterval: 60_000,
   });
@@ -42,6 +28,7 @@ export default function RoutesPage() {
           checked every 3 hours. Tap “Alert me” and this phone gets a notification when your
           route is likely to flood. No account needed.
         </p>
+        {checked && <p className="freshness">{checked}</p>}
       </header>
 
       {alerts && alerts.length > 0 && (
@@ -65,26 +52,7 @@ export default function RoutesPage() {
 
       <div className="route-list">
         {!routes && !error && [0, 1, 2, 3].map((i) => <div key={i} className="route-card skeleton" />)}
-        {routes?.map((r) => {
-          const s = STATUS[r.current_status] ?? STATUS.clear;
-          return (
-            <article key={r.id} className="route-card">
-              <div className="route-top">
-                <span className={`status-badge ${r.current_status}`}>
-                  <span className="dot" aria-hidden="true" />
-                  {s.label}
-                </span>
-                <span className="tag">{usually(r.baseline_risk)}</span>
-              </div>
-              <h2>{r.name}</h2>
-              <p className="route-line">
-                {r.from_stop} → {r.to_stop}
-              </p>
-              <p className="route-status">{s.line}</p>
-              <SubscribeButton routeId={r.id} />
-            </article>
-          );
-        })}
+        {routes?.map((r) => <RouteCard key={r.id} route={r} showOnMap />)}
       </div>
     </main>
   );

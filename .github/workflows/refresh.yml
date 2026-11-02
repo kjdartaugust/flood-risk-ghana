@@ -17,7 +17,10 @@ name: refresh
 
 on:
   schedule:
-    - cron: "0 */3 * * *"
+    # Every 3 hours, at 17 minutes past rather than on the hour. GitHub delays
+    # and drops scheduled runs at busy times, the top of the hour worst of all:
+    # on "0 */3" only 3 or 4 of the day's 8 runs happened, up to an hour late.
+    - cron: "17 */3 * * *"
   workflow_dispatch: # lets you trigger a refresh by hand from the Actions tab
 
 permissions:

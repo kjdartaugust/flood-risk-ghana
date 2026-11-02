@@ -104,6 +104,12 @@ def test_routes_listed_with_status():
     if routes:
         assert routes[0]["current_status"] in {
             "clear", "watch", "warning", "severe"}
+        # Enough to draw it: a line of [lng, lat] pairs, in Accra.
+        path = routes[0]["path"]
+        assert len(path) >= 2
+        lng, lat = path[0]
+        assert -0.5 < lng < 0.1 and 5.4 < lat < 5.8
+        assert isinstance(routes[0]["hours"], list)
 
 
 def test_subscribe_requires_auth():
@@ -230,6 +236,9 @@ async def test_rain_refresh_upserts_and_routes_forecast_from_it(monkeypatch):
     assert points, "no route crosses a refreshed tile"
     # Updated in place: the second run's value, not a duplicate of the first.
     assert {p["precip_mm"] for p in points} == {7.0}
+    # The route list carries the same hours, for the rain strip.
+    hours = [h for r in client.get("/api/v1/routes").json() for h in r["hours"]]
+    assert hours and {h["precip_mm"] for h in hours} == {7.0}
 
 
 def test_each_refresh_records_whether_it_saved_rain(monkeypatch):

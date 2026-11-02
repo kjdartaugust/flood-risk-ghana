@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import datetime as dt
 
+from geoalchemy2.shape import to_shape
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import TrotroRoute
-from app.schemas import RouteForecastPoint, RouteForecastResponse, RouteSummary
+from app.schemas import RouteForecastPoint, RouteForecastResponse, RouteHour, RouteSummary
 
 
 def _status(risk: float, precip_mm: float) -> str:
@@ -53,6 +54,13 @@ async def _route_forecast_precip(
     return [(row[0], float(row[1] or 0.0)) for row in rows]
 
 
+def _path(route: TrotroRoute) -> list[tuple[float, float]]:
+    """The route's line as [lng, lat] pairs, rounded to ~1 m to keep it small."""
+    if route.geom is None:
+        return []
+    return [(round(x, 5), round(y, 5)) for x, y in to_shape(route.geom).coords]
+
+
 async def list_routes(db: AsyncSession) -> list[RouteSummary]:
     routes = (await db.execute(select(TrotroRoute))).scalars().all()
     out: list[RouteSummary] = []
@@ -67,6 +75,11 @@ async def list_routes(db: AsyncSession) -> list[RouteSummary]:
             id=r.id, name=r.name, from_stop=r.from_stop, to_stop=r.to_stop,
             baseline_risk=r.baseline_risk, current_status=status,
             active_alert=active > 0,
+            # Already in hand from the status check: the map draws the line and
+            # the rain strip without another request per route.
+            path=_path(r),
+            hours=[RouteHour(at=at, precip_mm=round(p, 1),
+                             status=_status(r.baseline_risk, p)) for at, p in fc],
         ))
     return out
 

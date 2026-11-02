@@ -25,14 +25,37 @@ export interface RiskPoint {
   advice: string;
 }
 
+export type RouteStatus = "clear" | "watch" | "warning" | "severe";
+
+/** One forecast hour on a route: the wettest cell it crosses. */
+export interface RouteHour {
+  at: string;
+  precip_mm: number;
+  status: RouteStatus;
+}
+
 export interface RouteSummary {
   id: string;
   name: string;
   from_stop: string | null;
   to_stop: string | null;
   baseline_risk: number;
-  current_status: "clear" | "watch" | "warning" | "severe";
+  current_status: RouteStatus;
   active_alert: boolean;
+  /** [lng, lat] pairs, ready for GeoJSON. */
+  path: [number, number][];
+  /** The coming hours of rain the status was judged on. */
+  hours: RouteHour[];
+}
+
+/** The latest scheduled rain check, and whether it saved anything. */
+export interface RefreshRun {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  rainfall_rows: number | null;
+  alerts_raised: number | null;
+  error: string | null;
 }
 
 export interface Alert {
@@ -152,6 +175,7 @@ export const api = {
     severity: number;
     note?: string;
   }) => post<FloodReport>(`/reports`, r),
+  lastRainCheck: () => get<RefreshRun>(`/internal/refresh`),
   recentReports: (limit = 100) =>
     get<FloodReport[]>(`/reports/recent?limit=${limit}`),
 };
