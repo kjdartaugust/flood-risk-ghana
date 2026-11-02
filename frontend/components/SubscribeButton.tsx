@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { iosAtLeast, isIOS, isStandalone } from "@/lib/install";
 import {
   PushUnavailable,
   disablePush,
@@ -23,11 +24,21 @@ const BLOCKED: Record<string, string> = {
   "server-off": "Push isn't switched on for this deployment yet.",
 };
 
+/** Safari on an iPhone can't push to a tab; FloodWatch opened from the Home
+ * Screen can (iOS 16.4 and later). What to tell an iPhone user, if anything. */
+function iphoneHint(): string | null {
+  if (!isIOS()) return null;
+  if (iosAtLeast(16, 4) === false) return "Alerts on iPhone need iOS 16.4 or newer.";
+  if (isStandalone()) return null;
+  return "On iPhone, alerts come through the Home Screen app: in Safari, tap Share, then “Add to Home Screen”. Open FloodWatch from there and tap Alert me.";
+}
+
 /** One tap, no account: this phone gets a notification if the route floods. */
 export default function SubscribeButton({ routeId }: { routeId: string }) {
   // Signed in (where sign-in exists): alerts follow the account. Otherwise null.
   const { token } = useAuth();
   const [supported, setSupported] = useState(false);
+  const [iphone, setIphone] = useState<string | null>(null);
   const [state, setState] = useState<"idle" | "working" | "on">("idle");
   const [note, setNote] = useState<string | null>(null);
 
@@ -35,6 +46,7 @@ export default function SubscribeButton({ routeId }: { routeId: string }) {
   // and the first client render agree.
   useEffect(() => {
     setSupported(pushSupported());
+    setIphone(iphoneHint());
     if (!followedRoutes().has(routeId)) return;
     setState("on");
     refreshPush(routeId, token)
@@ -48,7 +60,19 @@ export default function SubscribeButton({ routeId }: { routeId: string }) {
       .catch(() => {});
   }, [routeId, token]);
 
-  if (!supported) return null;
+  if (!supported) {
+    // An iPhone can get alerts, just not from a Safari tab: say how.
+    if (!iphone) return null;
+    return (
+      <div className="sub">
+        <button className="btn ghost sm" onClick={() => setNote(iphone)}>
+          <BellIcon size={16} />
+          Alert me
+        </button>
+        {note && <span className="muted sub-hint">{note}</span>}
+      </div>
+    );
+  }
 
   /** A real notification now, instead of a promise that one will come. */
   async function test(): Promise<"sent" | "dropped" | "failed"> {

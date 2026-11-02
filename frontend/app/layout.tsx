@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import RegisterSW from "@/components/RegisterSW";
 import SiteHeader from "@/components/SiteHeader";
 import { AuthProvider } from "@/lib/auth";
 // MapLibre's styles first, so ours can override them.
@@ -12,6 +13,9 @@ export const metadata: Metadata = {
   },
   description:
     "Check the flood risk of any place in Accra before you buy, build or rent, and get a phone alert before your trotro route floods.",
+  applicationName: "FloodWatch Ghana",
+  // Added to an iPhone's home screen: opens full screen, under its own name.
+  appleWebApp: { capable: true, title: "FloodWatch", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
@@ -27,10 +31,18 @@ export const viewport: Viewport = {
   ],
 };
 
+// Chrome can offer to install before the app is listening: keep the offer.
+const CATCH_INSTALL =
+  "addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__fwInstall=e})";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: CATCH_INSTALL }} />
+      </head>
       <body>
+        <RegisterSW />
         <AuthProvider>
           <SiteHeader />
           {children}
