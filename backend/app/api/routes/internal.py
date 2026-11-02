@@ -43,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import SessionLocal, get_db
-from app.etl.rainfall import openmeteo_url, refresh_rainfall, sample_points, top_tiles
+from app.etl.rainfall import openmeteo_url, plan_points, refresh_rainfall
 from app.models import RefreshRun
 from app.schemas import RefreshPlanResponse, RefreshRequest, RefreshRunResponse
 from app.security import bearer, is_github_workflow
@@ -149,8 +149,9 @@ async def trigger_refresh(
 async def refresh_plan(db: AsyncSession = Depends(get_db)) -> RefreshPlanResponse:
     """For a scheduler that fetches the rain itself and posts it back, because
     Open-Meteo turns this server's shared IP away (see `app.etl.rainfall`).
-    Public: the points are tile centroids, which /risk/tiles already serves."""
-    points = sample_points(await top_tiles(db))
+    Public: the points are grid cells over tiles and routes, which /risk/tiles
+    and /routes/lines already serve."""
+    points = await plan_points(db)
     return RefreshPlanResponse(points=points, url=openmeteo_url(points))
 
 

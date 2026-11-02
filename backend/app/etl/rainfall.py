@@ -13,17 +13,19 @@ over; we only fetch it ourselves when nobody did.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
+import math
 from collections.abc import Sequence
 from urllib.parse import urlencode
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import bindparam, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import RainfallObs, RiskTile
+from app.models import RainfallObs, RiskTile, TrotroRoute
 
 log = logging.getLogger("etl.rainfall")
 
@@ -39,13 +41,33 @@ BATCH = 100
 # fifteenth of the per-IP allowance.
 SAMPLE_DEG = 0.05
 
+# A route as (id, [(lng, lat), ...]).
+Line = tuple[str, list[tuple[float, float]]]
 
-def sample_points(tiles: Sequence[RiskTile]) -> list[Point]:
-    """One point per SAMPLE_DEG grid cell that holds a tile, in a stable order."""
-    def snap(v: float) -> float:
-        return round(round(v / SAMPLE_DEG) * SAMPLE_DEG, 4)
 
-    return sorted({(snap(t.centroid_lat), snap(t.centroid_lng)) for t in tiles})
+def _snap(v: float) -> float:
+    return round(round(v / SAMPLE_DEG) * SAMPLE_DEG, 4)
+
+
+def route_cells(coords: Sequence[tuple[float, float]]) -> set[Point]:
+    """The grid cells a line passes through, as sample points. Steps a quarter
+    cell at a time, so a long straight stretch can't skip one."""
+    cells = {(_snap(lat), _snap(lng)) for lng, lat in coords[:1]}
+    for (x1, y1), (x2, y2) in zip(coords, coords[1:], strict=False):
+        steps = max(1, math.ceil(max(abs(x2 - x1), abs(y2 - y1)) / (SAMPLE_DEG / 4)))
+        cells |= {(_snap(y1 + (y2 - y1) * k / steps), _snap(x1 + (x2 - x1) * k / steps))
+                  for k in range(1, steps + 1)}
+    return cells
+
+
+def sample_points(tiles: Sequence[RiskTile], lines: Sequence[Line] = ()) -> list[Point]:
+    """One point per SAMPLE_DEG grid cell that holds a tile or that a route
+    passes through, in a stable order. Routes reach well past the risk grid:
+    out to Kasoa, Medie and Tema."""
+    cells = {(_snap(t.centroid_lat), _snap(t.centroid_lng)) for t in tiles}
+    for _, coords in lines:
+        cells |= route_cells(coords)
+    return sorted(cells)
 
 
 def _params(points: Sequence[Point]) -> dict:
@@ -104,15 +126,25 @@ async def _fetch_all(points: Sequence[Point]) -> list[dict | None]:
     return out
 
 
-def _rows(tile: RiskTile, data: dict, now: dt.datetime) -> list[dict]:
-    """One tile's hourly series as rainfall_obs rows; also refreshes the tile's
-    recent-rainfall feature."""
+def _series(data: dict) -> list[tuple[dt.datetime, float]]:
+    """Open-Meteo's hourly arrays as (UTC hour, mm) pairs."""
     hourly = data.get("hourly", {})
-    series = [
+    return [
         (dt.datetime.fromisoformat(ts).replace(tzinfo=dt.UTC), float(mm or 0.0))
         for ts, mm in zip(hourly.get("time", []), hourly.get("precipitation", []),
                           strict=False)
     ]
+
+
+def _nearest(points: Sequence[Point], lat: float, lng: float) -> int:
+    return min(range(len(points)), key=lambda i: (
+        (points[i][0] - lat) ** 2 + (points[i][1] - lng) ** 2))
+
+
+def _rows(tile: RiskTile, data: dict, now: dt.datetime) -> list[dict]:
+    """One tile's hourly series as rainfall_obs rows; also refreshes the tile's
+    recent-rainfall feature."""
+    series = _series(data)
     # keep the tile's recent-rainfall feature warm
     tile.rainfall_recent_mm = round(sum(mm for at, mm in series if at <= now), 2)
     return [
@@ -130,12 +162,59 @@ async def top_tiles(db: AsyncSession, limit: int = 400) -> Sequence[RiskTile]:
     )).scalars().all()
 
 
+async def route_lines(db: AsyncSession) -> list[Line]:
+    """Every route's line, as (id, [(lng, lat), ...])."""
+    rows = (await db.execute(
+        select(TrotroRoute.id, func.ST_AsGeoJSON(TrotroRoute.geom, 5))
+    )).all()
+    return [(rid, [tuple(c) for c in json.loads(geom)["coordinates"]])
+            for rid, geom in rows]
+
+
+async def plan_points(db: AsyncSession) -> list[Point]:
+    """Where a refresh samples rain: the top tiles' cells and every route's."""
+    return sample_points(await top_tiles(db), await route_lines(db))
+
+
+async def refresh_route_rain(
+    db: AsyncSession,
+    lines: Sequence[Line],
+    points: Sequence[Point],
+    forecasts: Sequence[dict | None],
+    now: dt.datetime,
+) -> int:
+    """Store each route's coming hours of rain on the route: per hour, the most
+    forecast for any cell it passes through. Returns the routes updated.
+
+    One statement for all of them. A route whose cells all failed to fetch
+    keeps its last forecast rather than being told it will be dry."""
+    updates = []
+    for rid, coords in lines:
+        near = {_nearest(points, lat, lng) for lat, lng in route_cells(coords)}
+        hours: dict[dt.datetime, float] = {}
+        for i in near:
+            for at, mm in _series(forecasts[i]) if forecasts[i] is not None else []:
+                if at > now:
+                    hours[at] = max(hours.get(at, 0.0), mm)
+        if hours:
+            updates.append({"rid": rid, "fc": [[at.isoformat(), round(mm, 2)]
+                                               for at, mm in sorted(hours.items())]})
+    if updates:
+        routes = TrotroRoute.__table__
+        await db.execute(
+            update(routes).where(routes.c.id == bindparam("rid"))
+            .values(forecast=bindparam("fc", type_=routes.c.forecast.type)),
+            updates)
+    return len(updates)
+
+
 async def refresh_rainfall(
     db: AsyncSession,
     limit_tiles: int = 400,
     fetched: tuple[Sequence[Point], Sequence[dict | None]] | None = None,
 ) -> int:
-    """Refresh rainfall for the highest-risk tiles. Returns rows upserted.
+    """Refresh rainfall for the highest-risk tiles and along every route.
+    Returns tile rows upserted.
 
     `fetched` is (points, forecasts) that a caller already fetched, as
     `openmeteo_url` asked; without it, we fetch them ourselves.
@@ -144,8 +223,9 @@ async def refresh_rainfall(
     if not tiles:
         log.warning("no risk tiles yet; run ETL tiles/seed first")
         return 0
+    lines = await route_lines(db)
     if fetched is None:
-        points = sample_points(tiles)
+        points = sample_points(tiles, lines)
         forecasts = await _fetch_all(points)
     else:
         points, forecasts = fetched
@@ -153,9 +233,7 @@ async def refresh_rainfall(
     now = dt.datetime.now(dt.UTC)
     rows: list[dict] = []
     for tile in tiles:
-        nearest = min(range(len(points)), key=lambda i: (
-            (points[i][0] - tile.centroid_lat) ** 2
-            + (points[i][1] - tile.centroid_lng) ** 2))
+        nearest = _nearest(points, tile.centroid_lat, tile.centroid_lng)
         if forecasts[nearest] is not None:
             rows += _rows(tile, forecasts[nearest], now)
 
@@ -171,7 +249,8 @@ async def refresh_rainfall(
     )
     if rows:
         await db.execute(upsert, rows)
+    routes = await refresh_route_rain(db, lines, points, forecasts, now)
     await db.commit()
-    log.info("rainfall refresh: %d rows across %d tiles from %d points",
-             len(rows), len(tiles), len(points))
+    log.info("rainfall refresh: %d rows across %d tiles and %d routes from %d points",
+             len(rows), len(tiles), routes, len(points))
     return len(rows)

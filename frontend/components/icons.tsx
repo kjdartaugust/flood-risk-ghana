@@ -57,6 +57,16 @@ export const BellIcon = ({ size = 18 }: { size?: number }) => (
   </Icon>
 );
 
+/** A minibus, for trotro routes. */
+export const BusIcon = ({ size = 20 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M4 16V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v9" />
+    <path d="M4 11h16M4 16h16v2H4z" />
+    <circle cx="7.5" cy="19.5" r="1.5" />
+    <circle cx="16.5" cy="19.5" r="1.5" />
+  </Icon>
+);
+
 export const ChevronIcon = () => (
   <Icon size={18}>
     <path d="m9 18 6-6-6-6" />

@@ -1,5 +1,5 @@
 // Rain and time, in the words someone at a trotro stop would use.
-import type { RouteHour, RouteStatus } from "./api";
+import type { RouteHour, RouteStatus, RouteSummary } from "./api";
 
 /** "3 pm", in Accra's time (GMT all year). */
 export function clock(iso: string): string {
@@ -30,12 +30,25 @@ export function rainSummary(hours: RouteHour[]): string {
   return `${start}, heaviest around ${clock(peak.at)} (${Math.round(peak.precip_mm)} mm).`;
 }
 
+/** What we can say about a route: its status, or nothing yet. */
+export type Shown = RouteStatus | "unknown";
+
+/** A route added since the last rain check has no forecast to judge by.
+ * Calling that "Clear" would be a guess. */
+export function shownStatus(route: RouteSummary): Shown {
+  return route.hours?.length ? route.current_status : "unknown";
+}
+
 /** What each status means for someone about to board. */
-export const STATUS: Record<RouteStatus, { label: string; line: string }> = {
+export const STATUS: Record<Shown, { label: string; line: string }> = {
   clear: { label: "Clear", line: "No flooding expected in the next 12 hours." },
   watch: { label: "Watch", line: "Rain on the way. Minor flooding possible, so allow extra time." },
   warning: { label: "Warning", line: "Flooding likely at low points. Expect delays." },
   severe: { label: "Severe", line: "Severe flooding expected. Avoid the peak if you can." },
+  unknown: {
+    label: "No forecast yet",
+    line: "The next rain check, within 3 hours, will fill this in.",
+  },
 };
 
 /** Route line colours on the map: calm blue when clear, warming with danger. */

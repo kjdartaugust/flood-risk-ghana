@@ -1,7 +1,8 @@
 """One-shot seed: historical flood events, risk tiles, and trotro routes.
 
 Run: python -m app.etl.seed
-Idempotent — safe to re-run. Called by the backend entrypoint on first boot.
+Idempotent — safe to re-run. The backend entrypoint runs it on every boot, and
+each step writes only when something changed.
 """
 from __future__ import annotations
 
@@ -17,9 +18,9 @@ from sqlalchemy import func, select
 
 from app.config import settings
 from app.db import SessionLocal
-from app.etl.osm_routes import ingest_routes
+from app.etl.osm_routes import set_baselines, sync_routes
 from app.etl.terrain import build_tiles
-from app.models import FloodEvent, RiskTile, TrotroRoute
+from app.models import FloodEvent, RiskTile
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("seed")
@@ -97,17 +98,17 @@ async def _tiles_are_stale() -> bool:
 
 async def main() -> None:
     await seed_flood_events()
-    if await _tiles_are_stale():
+    retiled = await _tiles_are_stale()
+    if retiled:
         async with SessionLocal() as db:
             # Populate the risk grid first so routes can compute baseline risk.
             await build_tiles(db, settings.h3_resolution)
     else:
         log.info("risk_tiles current — skipping build_tiles")
-    if await _count(TrotroRoute) == 0:
-        async with SessionLocal() as db:
-            await ingest_routes(db, use_overpass=False)
-    else:
-        log.info("trotro_routes already populated — skipping ingest_routes")
+    async with SessionLocal() as db:
+        changed = await sync_routes(db)
+        # A new grid moves every route's worst tile, not just the changed routes'.
+        await set_baselines(db, None if retiled else changed)
     log.info("seed complete")
 
 

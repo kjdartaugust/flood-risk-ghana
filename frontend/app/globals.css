@@ -373,6 +373,14 @@ h3 {
   box-shadow: 0 0 0 1.5px var(--surface);
 }
 
+.legend-route.risky {
+  margin-top: 0;
+}
+
+.legend-route.risky i {
+  background: #f76707;
+}
+
 @media (min-width: 900px) {
   .legend {
     top: auto;
@@ -769,6 +777,31 @@ h3 {
   padding: 14px 8px;
   color: var(--muted);
   font-size: 14px;
+}
+
+.results-group {
+  padding: 12px 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.results-group:first-child {
+  padding-top: 2px;
+}
+
+.results small.route-hint.watch {
+  color: var(--warn-ink);
+}
+
+.results small.route-hint.warning {
+  color: var(--orange-ink);
+}
+
+.results small.route-hint.severe {
+  color: var(--bad-ink);
 }
 
 /* ── Before anything is picked ───────────────────────────────────────────── */
@@ -1318,6 +1351,148 @@ h3 {
 .status-badge.severe {
   background: var(--bad-soft);
   color: var(--bad-ink);
+}
+
+.status-badge.unknown {
+  background: var(--fill);
+  color: var(--muted);
+}
+
+/* ── Route rows: many routes, one line each ─────────────────────────────── */
+
+.route-rows h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.route-rows ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-rows li + li {
+  border-top: 1px solid var(--line);
+}
+
+.route-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.route-row:hover .row-name {
+  color: var(--brand);
+}
+
+.route-row svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.row-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #0a66ff;
+}
+
+.row-dot.watch {
+  background: #e0a400;
+}
+
+.row-dot.warning {
+  background: #f76707;
+}
+
+.row-dot.severe {
+  background: #e03131;
+}
+
+.row-dot.unknown {
+  background: var(--fill-strong);
+}
+
+.row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.row-status {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.row-status.watch {
+  color: var(--warn-ink);
+}
+
+.row-status.warning {
+  color: var(--orange-ink);
+}
+
+.row-status.severe {
+  color: var(--bad-ink);
+}
+
+.route-rows .more {
+  margin-top: 8px;
+}
+
+/* An opened row: the full card, in its place in the list. */
+.route-rows li > .route-card {
+  margin: 8px 0;
+  animation: rise 0.3s var(--ease);
+}
+
+/* A list under a place's answer in the map's panel. */
+.sheet-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  animation: rise 0.35s var(--ease);
+}
+
+.route-search {
+  margin-bottom: 20px;
+}
+
+.page .route-rows,
+.route-group {
+  margin-top: 26px;
+}
+
+.route-group h2 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.source {
+  margin: 36px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .tag {

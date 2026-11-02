@@ -2,16 +2,18 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import PlaceSearch from "@/components/PlaceSearch";
 import RiskResult, { ResultSkeleton } from "@/components/RiskResult";
+import RouteRows from "@/components/RouteRows";
 import Sheet, { isDesktop, sheetHeight, type Snap } from "@/components/Sheet";
 import WakeNotice from "@/components/WakeNotice";
 import { BellIcon, ChevronIcon } from "@/components/icons";
-import { api, type RiskPoint, type RouteSummary } from "@/lib/api";
+import { api, type RiskPoint, type RouteLines, type RouteSummary } from "@/lib/api";
 import { nameOf } from "@/lib/places";
 import { HEADLINE, RISK_COLOR } from "@/lib/risk";
+import { byConcern, routesNear, worstFirst } from "@/lib/routes";
 import { useRainCheck } from "@/lib/useRainCheck";
 import { useServer } from "@/lib/useServer";
 
@@ -38,20 +40,36 @@ export default function Home() {
   const { data: routes } = useSWR<RouteSummary[]>("routes", () => api.routes(), {
     refreshInterval: 120_000,
   });
+  // The lines only change with a deploy: fetch once, the browser keeps them.
+  const { data: lines } = useSWR<RouteLines>("route-lines", () => api.routeLines(), {
+    revalidateOnFocus: false,
+    revalidateIfStale: false,
+  });
   const [spot, setSpot] = useState<Spot | null>(null);
   const [risk, setRisk] = useState<RiskPoint | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [routeId, setRouteId] = useState<string | null>(null);
+  // Several flooding routes share the road that was tapped: which one?
+  const [choice, setChoice] = useState<string[] | null>(null);
   const [snap, setSnap] = useState<Snap>("peek");
   const [focus, setFocus] = useState<(Spot & { seq: number; zoomIn: boolean }) | null>(null);
-  const [fit, setFit] = useState<{ path: [number, number][]; seq: number } | null>(null);
+  const [fit, setFit] = useState<{ path: number[][]; seq: number } | null>(null);
   const [locating, setLocating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const latest = useRef(0);
   const frameRoute = useRef(false);
 
-  const openRoute = routes?.find((r) => r.id === routeId) ?? null;
+  const byId = useMemo(() => new Map((routes ?? []).map((r) => [r.id, r])), [routes]);
+  const openRoute = (routeId && byId.get(routeId)) || null;
   const lostRoute = routeId !== null && routes !== undefined && openRoute === null;
+  const pick = (ids: string[]) => ids.flatMap((id) => byId.get(id) ?? []);
+
+  // The routes that pass the spot being checked: someone choosing where to
+  // live wants to know how they'd get about in the rain, too.
+  const through = useMemo(
+    () => (spot ? routesNear(lines, spot.lat, spot.lng) : []),
+    [lines, spot]
+  );
 
   const score = useCallback(async (s: Spot) => {
     // Only the most recent pick may land: a slow answer for the previous spot
@@ -73,6 +91,7 @@ export default function Home() {
   const select = useCallback(
     (s: Spot, zoomIn: boolean) => {
       setRouteId(null);
+      setChoice(null);
       setSpot(s);
       setFocus((f) => ({ ...s, zoomIn, seq: (f?.seq ?? 0) + 1 }));
       setSnap("half");
@@ -86,10 +105,27 @@ export default function Home() {
     setSpot(null);
     setRisk(null);
     setStatus("idle");
+    setChoice(null);
     setRouteId(id);
     setSnap("half");
     frameRoute.current = true;
   }, []);
+
+  const tappedRoutes = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 1) {
+        showRoute(ids[0]);
+        return;
+      }
+      latest.current++;
+      setSpot(null);
+      setRisk(null);
+      setRouteId(null);
+      setChoice(ids);
+      setSnap("half");
+    },
+    [showRoute]
+  );
 
   function closeRoute() {
     setRouteId(null);
@@ -98,10 +134,12 @@ export default function Home() {
 
   // Frame the route once its line has arrived (a shared link can beat the data).
   useEffect(() => {
-    if (!frameRoute.current || !openRoute) return;
+    if (!frameRoute.current || !routeId || !lines) return;
+    const line = lines.features.find((f) => f.properties.id === routeId);
+    if (!line) return;
     frameRoute.current = false;
-    setFit((f) => ({ path: openRoute.path, seq: (f?.seq ?? 0) + 1 }));
-  }, [openRoute]);
+    setFit((f) => ({ path: line.geometry.coordinates, seq: (f?.seq ?? 0) + 1 }));
+  }, [routeId, lines]);
 
   // Every answer has its own link, to send on WhatsApp or open again later.
   useEffect(() => {
@@ -191,18 +229,23 @@ export default function Home() {
     ? { top: 90, left: 450, right: 40, bottom: 40 }
     : { top: 80, left: 24, right: 24, bottom: sheetHeight("half") + 16 };
 
+  // Nearest first, but a route that's flooding comes before one that isn't.
+  const passing = pick(through).sort(worstFirst);
+  const choices = choice ? pick(choice).sort(byConcern) : [];
+
   return (
     <main className="mapview">
       <RiskMap
         pin={spot}
         pinColor={risk ? RISK_COLOR[risk.band] : undefined}
         focus={focus}
+        lines={lines ?? null}
         routes={routes ?? []}
         route={routeId}
         fit={fit}
         padding={padding}
         onPick={tapped}
-        onRoute={showRoute}
+        onRoutes={tappedRoutes}
       />
       <WakeNotice {...server} />
       {toast && (
@@ -213,11 +256,13 @@ export default function Home() {
 
       <Sheet snap={snap} onSnap={setSnap} label="Check a place">
         {/* Once there's an answer on screen, the question has done its job. */}
-        <h1 className={spot || openRoute ? "visually-hidden" : "sheet-title"}>
+        <h1 className={spot || openRoute || choice ? "visually-hidden" : "sheet-title"}>
           Will it flood here?
         </h1>
         <PlaceSearch
+          routes={routes}
           onPick={(p) => select({ lat: p.lat, lng: p.lng, name: p.name }, true)}
+          onRoute={showRoute}
           onLocate={locate}
           onFocus={() => {
             if (!isDesktop()) setSnap("full");
@@ -225,8 +270,18 @@ export default function Home() {
           locating={locating}
         />
 
-        {openRoute && <RouteCard route={openRoute} checked={checked} onClose={closeRoute} />}
+        {openRoute && <RouteCard route={openRoute} checked={checked} inSheet onClose={closeRoute} />}
         {routeId && !routes && <ResultSkeleton place="Trotro route" />}
+
+        {choices.length > 0 && (
+          <div className="sheet-section">
+            <RouteRows
+              title={`${choices.length} routes on this road where flooding is expected`}
+              routes={choices}
+              onOpen={showRoute}
+            />
+          </div>
+        )}
 
         {spot && status === "loading" && <ResultSkeleton place={spot.name} />}
         {spot && status === "error" && (
@@ -241,12 +296,29 @@ export default function Home() {
         {spot && risk && (
           <RiskResult place={spot.name} risk={risk} onShare={share} onReported={() => score(spot)} />
         )}
+        {/* Not waiting on the score: on a cold start that can take a minute. */}
+        {spot && passing.length > 0 && (
+          <div className="sheet-section">
+            <RouteRows
+              key={`${spot.lat},${spot.lng}`}
+              title={
+                passing.length === 1
+                  ? "1 trotro route passes here"
+                  : `${passing.length} trotro routes pass here`
+              }
+              routes={passing}
+              limit={6}
+              onOpen={showRoute}
+            />
+          </div>
+        )}
 
-        {!spot && (!routeId || lostRoute) && (
+        {!spot && !choice && (!routeId || lostRoute) && (
           <div className="intro">
             <p>
-              Check any place in Accra before you buy land, build or rent. Search above, or tap
-              the map. The coloured lines are trotro routes: tap one for its rain forecast.
+              Check any place in Accra before you buy land, build or rent: search above, or tap
+              the map. The blue lines are trotro routes{routes ? ` (${routes.length})` : ""}.
+              Search a stop, like Kaneshie, to find yours.
             </p>
             <Link href="/routes" className="promo">
               <span className="promo-icon">

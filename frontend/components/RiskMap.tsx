@@ -10,7 +10,7 @@ import maplibregl, {
   type PaddingOptions,
 } from "maplibre-gl";
 import { useEffect, useRef } from "react";
-import { api, type RouteSummary } from "@/lib/api";
+import { api, type RouteLines, type RouteSummary } from "@/lib/api";
 import { ROUTE_COLOR } from "@/lib/rain";
 import { RISK_COLOR } from "@/lib/risk";
 
@@ -78,65 +78,100 @@ const ROUTE_LINE_COLOR = [
 ] as ExpressionSpecification;
 
 const ROUND = { "line-cap": "round", "line-join": "round" } as const;
+const RISKY = ["!=", ["get", "status"], "clear"] as ExpressionSpecification;
+const RANK = { clear: 0, watch: 1, warning: 2, severe: 3 };
+const OPEN = ["route-open-glow", "route-open-casing", "route-open"];
 
+const isOpen = (id: string | null): ExpressionSpecification => ["==", ["get", "id"], id ?? ""];
+const byZoom = (...stops: number[]) =>
+  ["interpolate", ["linear"], ["zoom"], ...stops] as ExpressionSpecification;
+
+// Hundreds of routes share Accra's main roads. On a dry day they're a quiet
+// network under the risk colours; where flooding is expected they thicken and
+// warm up, on top; the open route sits above everything.
 function routeLayers(dark: boolean, selected: string | null): LayerSpecification[] {
+  const casing = dark ? "#0a0e15" : "#ffffff";
   return [
     {
-      // A soft halo under whichever route is open.
-      id: "routes-glow",
+      id: "routes",
       type: "line",
       source: "routes",
-      filter: ["==", ["get", "id"], selected ?? ""],
+      filter: ["!", RISKY],
+      layout: ROUND,
+      paint: {
+        "line-color": ROUTE_COLOR.clear,
+        "line-opacity": dark ? 0.62 : 0.5,
+        "line-width": byZoom(10, 0.8, 13, 1.8, 16, 4),
+      },
+    },
+    {
+      id: "routes-risk-casing",
+      type: "line",
+      source: "routes",
+      filter: RISKY,
+      layout: ROUND,
+      paint: { "line-color": casing, "line-width": byZoom(10, 4, 13, 7, 16, 12) },
+    },
+    {
+      id: "routes-risk",
+      type: "line",
+      source: "routes",
+      filter: RISKY,
+      layout: { ...ROUND, "line-sort-key": ["get", "rank"] },
+      paint: { "line-color": ROUTE_LINE_COLOR, "line-width": byZoom(10, 2, 13, 4, 16, 7) },
+    },
+    {
+      // A soft halo under whichever route is open.
+      id: "route-open-glow",
+      type: "line",
+      source: "routes",
+      filter: isOpen(selected),
       layout: ROUND,
       paint: {
         "line-color": ROUTE_LINE_COLOR,
-        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 14, 15, 30],
+        "line-width": byZoom(10, 14, 15, 30),
         "line-blur": 8,
         "line-opacity": 0.45,
       },
     },
     {
-      // A casing so the line reads over any colour of risk underneath.
-      id: "routes-casing",
+      id: "route-open-casing",
       type: "line",
       source: "routes",
+      filter: isOpen(selected),
       layout: ROUND,
-      paint: {
-        "line-color": dark ? "#0a0e15" : "#ffffff",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 5, 14, 10, 17, 16],
-      },
+      paint: { "line-color": casing, "line-width": byZoom(10, 6, 14, 11, 17, 16) },
     },
     {
-      id: "routes-line",
+      id: "route-open",
       type: "line",
       source: "routes",
+      filter: isOpen(selected),
       layout: ROUND,
-      paint: {
-        "line-color": ROUTE_LINE_COLOR,
-        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 6, 17, 11],
-      },
+      paint: { "line-color": ROUTE_LINE_COLOR, "line-width": byZoom(10, 3, 14, 6.5, 17, 11) },
     },
     {
-      // Invisible and wide: a thumb doesn't have to land on a 3px line.
-      id: "routes-hit",
+      // Invisible and wide, so a thumb can land on a route that's flooding.
+      // Only those: on a dry day a tap anywhere is close to some route, and
+      // it should check the place.
+      id: "routes-risk-hit",
       type: "line",
       source: "routes",
-      paint: { "line-color": "#000", "line-opacity": 0, "line-width": 26 },
+      filter: RISKY,
+      paint: { "line-color": "#000", "line-opacity": 0, "line-width": 24 },
     },
   ];
 }
 
-function routesGeoJSON(routes: RouteSummary[]): GeoJSON.FeatureCollection {
+/** The lines, each carrying its route's live status. */
+function routesGeoJSON(lines: RouteLines | null, routes: RouteSummary[]): GeoJSON.FeatureCollection {
+  const status = new Map(routes.map((r) => [r.id, r.current_status]));
   return {
     type: "FeatureCollection",
-    features: routes
-      // `?? []`: the site can go live a few minutes before the API that sends paths.
-      .filter((r) => (r.path ?? []).length >= 2)
-      .map((r) => ({
-        type: "Feature",
-        properties: { id: r.id, name: r.name, status: r.current_status },
-        geometry: { type: "LineString", coordinates: r.path },
-      })),
+    features: (lines?.features ?? []).map((f) => {
+      const s = status.get(f.properties.id) ?? "clear";
+      return { ...f, properties: { ...f.properties, status: s, rank: RANK[s] } };
+    }),
   };
 }
 
@@ -149,37 +184,41 @@ export default function RiskMap({
   pin,
   pinColor,
   focus,
+  lines,
   routes,
   route,
   fit,
   padding,
   onPick,
-  onRoute,
+  onRoutes,
 }: {
   pin: Spot | null;
   pinColor?: string;
   /** Fly here whenever `seq` changes; zoom in only for searches, not taps. */
   focus: (Spot & { seq: number; zoomIn: boolean }) | null;
+  lines: RouteLines | null;
+  /** Live statuses, to colour the lines by. */
   routes: RouteSummary[];
   /** The open route, drawn with a halo. */
   route: string | null;
   /** Frame this line whenever `seq` changes. */
-  fit: { path: [number, number][]; seq: number } | null;
+  fit: { path: number[][]; seq: number } | null;
   /** Room taken by the sheet or panel, so a focused spot isn't hidden under it. */
   padding: PaddingOptions;
   onPick: (lat: number, lng: number) => void;
-  onRoute: (id: string) => void;
+  /** A tap on routes where flooding is expected: their ids, worst first. */
+  onRoutes: (ids: string[]) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const marker = useRef<Marker | null>(null);
   const tiles = useRef<GeoJSON.FeatureCollection>({ type: "FeatureCollection", features: [] });
-  const lines = useRef<GeoJSON.FeatureCollection>(routesGeoJSON(routes));
+  const drawn = useRef<GeoJSON.FeatureCollection>(routesGeoJSON(lines, routes));
   const open = useRef(route);
   const pick = useRef(onPick);
-  const tapRoute = useRef(onRoute);
+  const tapRoutes = useRef(onRoutes);
   pick.current = onPick;
-  tapRoute.current = onRoute;
+  tapRoutes.current = onRoutes;
 
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 900px)").matches;
@@ -206,11 +245,16 @@ export default function RiskMap({
 
     // A new style (light ⇄ dark) wipes our layers, so add them back each time.
     m.on("style.load", () => {
-      // Under the labels, so place names stay on top of the colour.
-      const firstLabel = m.getStyle().layers.find((l) => l.type === "symbol")?.id;
+      // Over every road and building, under the labels after them, so place
+      // names stay on top of the colour. Not simply under the first label:
+      // the dark style draws water names before its roads, and that buried
+      // the routes under the streets.
+      const layers = m.getStyle().layers;
+      const lastShape = layers.map((l) => l.type !== "symbol").lastIndexOf(true);
+      const firstLabel = layers[lastShape + 1]?.id;
       if (!m.getSource("risk")) m.addSource("risk", { type: "geojson", data: tiles.current });
       if (!m.getLayer("risk")) m.addLayer(riskLayer(scheme() === "dark"), firstLabel);
-      if (!m.getSource("routes")) m.addSource("routes", { type: "geojson", data: lines.current });
+      if (!m.getSource("routes")) m.addSource("routes", { type: "geojson", data: drawn.current });
       for (const layer of routeLayers(scheme() === "dark", open.current)) {
         if (!m.getLayer(layer.id)) m.addLayer(layer, firstLabel);
       }
@@ -243,29 +287,32 @@ export default function RiskMap({
     });
     m.on("moveend", refresh);
 
-    // A tap on (or near) a route opens the route; anywhere else checks the spot.
+    // A tap on a route where flooding is expected opens it (or, on a shared
+    // road, offers the routes there); anywhere else checks the spot.
     m.on("click", (e) => {
-      if (m.getLayer("routes-hit")) {
+      if (m.getLayer("routes-risk-hit")) {
         const { x, y } = e.point;
-        const near = m.queryRenderedFeatures(
+        const hits = m.queryRenderedFeatures(
           [
-            [x - 8, y - 8],
-            [x + 8, y + 8],
+            [x - 6, y - 6],
+            [x + 6, y + 6],
           ],
-          { layers: ["routes-hit"] }
+          { layers: ["routes-risk-hit"] }
         );
-        const id = near[0]?.properties?.id;
-        if (id) {
-          tapRoute.current(String(id));
+        const ids = hits
+          .sort((a, b) => (b.properties?.rank ?? 0) - (a.properties?.rank ?? 0))
+          .map((f) => String(f.properties?.id));
+        if (ids.length) {
+          tapRoutes.current([...new Set(ids)]);
           return;
         }
       }
       pick.current(e.lngLat.lat, e.lngLat.lng);
     });
-    m.on("mouseenter", "routes-hit", () => {
+    m.on("mouseenter", "routes-risk-hit", () => {
       m.getCanvas().style.cursor = "pointer";
     });
-    m.on("mouseleave", "routes-hit", () => {
+    m.on("mouseleave", "routes-risk-hit", () => {
       m.getCanvas().style.cursor = "";
     });
 
@@ -281,14 +328,14 @@ export default function RiskMap({
   }, []);
 
   useEffect(() => {
-    lines.current = routesGeoJSON(routes);
-    (map.current?.getSource("routes") as GeoJSONSource | undefined)?.setData(lines.current);
-  }, [routes]);
+    drawn.current = routesGeoJSON(lines, routes);
+    (map.current?.getSource("routes") as GeoJSONSource | undefined)?.setData(drawn.current);
+  }, [lines, routes]);
 
   useEffect(() => {
     open.current = route;
     const m = map.current;
-    if (m?.getLayer("routes-glow")) m.setFilter("routes-glow", ["==", ["get", "id"], route ?? ""]);
+    for (const id of OPEN) if (m?.getLayer(id)) m.setFilter(id, isOpen(route));
   }, [route]);
 
   useEffect(() => {
@@ -325,8 +372,9 @@ export default function RiskMap({
   useEffect(() => {
     const m = map.current;
     if (!m || !fit || fit.path.length < 2) return;
-    const bounds = new maplibregl.LngLatBounds(fit.path[0], fit.path[0]);
-    for (const p of fit.path) bounds.extend(p);
+    const [lng, lat] = fit.path[0];
+    const bounds = new maplibregl.LngLatBounds([lng, lat], [lng, lat]);
+    for (const [x, y] of fit.path) bounds.extend([x, y]);
     const room = 28;
     m.fitBounds(bounds, {
       padding: {
@@ -354,6 +402,12 @@ export default function RiskMap({
           <i />
           Trotro route
         </span>
+        {routes.some((r) => r.current_status !== "clear") && (
+          <span className="legend-route risky">
+            <i />
+            Flooding expected
+          </span>
+        )}
       </div>
     </div>
   );

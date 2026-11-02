@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app import __version__
 from app.api.routes import alerts, health, internal, reports, risk, routes_ep
@@ -56,6 +57,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Route lines and the risk grid are hundreds of KB of JSON, often to phones
+    # on mobile data. Compressed, about a fifth.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     p = settings.api_v1_prefix
     app.include_router(health.router, prefix=p)

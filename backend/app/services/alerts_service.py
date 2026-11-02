@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import AlertSubscription, RouteAlert, TrotroRoute
 from app.schemas import AlertResponse, SubscribeRequest, SubscribeResponse
 from app.services.push import is_gone, push_enabled, send_push
-from app.services.routes_service import route_forecast
+from app.services.routes_service import JUDGE, forecast_for
 
 log = logging.getLogger("alerts")
 
@@ -67,18 +67,18 @@ async def evaluate_and_raise_alerts(db: AsyncSession) -> int:
     await db.execute(update(RouteAlert)
                      .where(RouteAlert.expires_at < now, RouteAlert.active.is_(True))
                      .values(active=False))
-    routes = (await db.execute(select(TrotroRoute))).scalars().all()
+    # Hundreds of routes: read them, and the alerts already up, once each.
+    routes = (await db.execute(select(TrotroRoute).options(JUDGE))).scalars().all()
+    live = set((await db.execute(
+        select(RouteAlert.route_id, RouteAlert.level).where(RouteAlert.active)
+    )).tuples().all())
     raised = 0
     for route in routes:
-        fc = await route_forecast(db, route.id)
+        fc = forecast_for(route)
         peak = max(fc.points, key=lambda p: p.risk_score, default=None)
         if peak is None or peak.status not in _LEVEL:
             continue
-        exists = (await db.execute(text(
-            "SELECT count(*) FROM route_alerts "
-            "WHERE route_id=:id AND active AND level=:lvl"),
-            {"id": route.id, "lvl": peak.status})).scalar()
-        if exists:
+        if (route.id, peak.status) in live:
             continue
         alert = RouteAlert(
             route_id=route.id, level=peak.status,

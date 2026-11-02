@@ -71,9 +71,9 @@ class RouteSummary(BaseModel):
     baseline_risk: float
     current_status: str  # clear | watch | warning | severe
     active_alert: bool
-    # The line to draw, as [lng, lat] pairs (GeoJSON order).
-    path: list[tuple[float, float]] = []
     # The coming hours of forecast rain — what `current_status` was judged on.
+    # Empty until the first rain refresh after the route was added. (The line
+    # itself is at GET /routes/lines: it changes far less often than this.)
     hours: list[RouteHour] = []
 
 

@@ -161,6 +161,18 @@ export function followedRoutes(): Set<string> {
   }
 }
 
+/** Forget followed routes that no longer exist (routes are rebuilt from
+ * OpenStreetMap now and then); the server dropped their alerts already. */
+export function keepFollowed(existing: Set<string>): Set<string> {
+  const kept = new Set([...followedRoutes()].filter((id) => existing.has(id)));
+  try {
+    localStorage.setItem(FOLLOWED, JSON.stringify([...kept]));
+  } catch {
+    // Storage blocked: nothing was remembered to begin with.
+  }
+  return kept;
+}
+
 export function setFollowed(routeId: string, on: boolean): void {
   try {
     const routes = followedRoutes();
