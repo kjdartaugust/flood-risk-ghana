@@ -97,18 +97,24 @@ class RiskTile(Base):
 
 
 class TrotroRoute(Base):
-    """A trotro route (OSM-derived) with an ordered LineString geometry."""
+    """A trotro line from OpenStreetMap (see `app.etl.osm_routes`), as one
+    ordered LineString. Its id is "osm-<relation id>", so links and alert
+    subscriptions survive a rebuilt database."""
 
     __tablename__ = "trotro_routes"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     osm_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    ref: Mapped[str | None] = mapped_column(String(20), nullable=True)
     name: Mapped[str] = mapped_column(String(200), index=True)
     from_stop: Mapped[str | None] = mapped_column(String(160), nullable=True)
     to_stop: Mapped[str | None] = mapped_column(String(160), nullable=True)
     geom = mapped_column(Geometry("LINESTRING", srid=4326), nullable=False)
     # cached: max risk tile the route passes through (0..100)
     baseline_risk: Mapped[float] = mapped_column(Float, default=0.0)
+    # The coming hours of rain along the route, [[iso hour, mm], ...], written by
+    # each rain refresh: judging hundreds of routes is then one query.
+    forecast: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

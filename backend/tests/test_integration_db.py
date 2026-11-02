@@ -11,6 +11,7 @@ Run locally with:  docker compose up -d postgis redis
 """
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import os
 import uuid
@@ -19,11 +20,14 @@ import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from geoalchemy2.shape import from_shape
+from shapely.geometry import LineString
 
 from app.config import settings
 from app.db import SessionLocal
-from app.etl import rainfall
+from app.etl import osm_routes, rainfall
 from app.main import app
+from app.models import TrotroRoute
 from app.services import alerts_service, push
 
 
@@ -100,16 +104,65 @@ def test_routes_listed_with_status():
     r = client.get("/api/v1/routes")
     assert r.status_code == 200
     routes = r.json()
-    assert isinstance(routes, list)
-    if routes:
-        assert routes[0]["current_status"] in {
-            "clear", "watch", "warning", "severe"}
-        # Enough to draw it: a line of [lng, lat] pairs, in Accra.
-        path = routes[0]["path"]
-        assert len(path) >= 2
-        lng, lat = path[0]
-        assert -0.5 < lng < 0.1 and 5.4 < lat < 5.8
-        assert isinstance(routes[0]["hours"], list)
+    # Accra's trotro lines from OpenStreetMap, not a handful of stand-ins.
+    assert len(routes) >= 250
+    statuses = {r["current_status"] for r in routes}
+    assert statuses <= {"clear", "watch", "warning", "severe"}
+    assert all(r["id"].startswith("osm-") for r in routes)
+    assert all(isinstance(r["hours"], list) for r in routes)
+    # The worst tile along a real route through central Accra is a real score.
+    assert max(r["baseline_risk"] for r in routes) > 0
+
+
+def test_route_lines_are_geojson_a_browser_can_keep():
+    r = client.get("/api/v1/routes/lines", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/geo+json")
+    assert r.headers["content-encoding"] == "gzip"  # ~300 KB as plain JSON
+    lines = r.json()["features"]
+    ids = {r["id"] for r in client.get("/api/v1/routes").json()}
+    assert {f["properties"]["id"] for f in lines} == ids
+    lng, lat = lines[0]["geometry"]["coordinates"][0]
+    assert -0.6 < lng < 0.2 and 5.4 < lat < 6.0
+    again = client.get("/api/v1/routes/lines",
+                       headers={"If-None-Match": r.headers["etag"]})
+    assert again.status_code == 304
+
+
+@pytest.mark.asyncio
+async def test_route_sync_writes_only_changes_and_retires_old_routes():
+    """Every boot syncs the bundle: nothing to write when nothing changed; a
+    renamed line is rewritten; a route no longer in it goes, with anyone's
+    subscription to it (the 5 hand-drawn stand-ins, on the first deploy)."""
+    bundle = osm_routes.load_bundle()
+    stand_in = TrotroRoute(id=str(uuid.uuid4()), name="Kaneshie – Circle",
+                           geom=from_shape(LineString([(-0.236, 5.562), (-0.205, 5.571)]),
+                                           srid=4326))
+    async with SessionLocal() as db:
+        assert await osm_routes.sync_routes(db, bundle) == []
+        db.add(stand_in)
+        await db.commit()
+    sub = {"endpoint": f"https://fcm.googleapis.com/fcm/send/it-{uuid.uuid4()}",
+           "keys": BROWSER_KEYS}
+    assert client.post("/api/v1/alerts/subscribe", json={
+        "route_id": stand_in.id, "channel": "push", "push_subscription": sub,
+    }).status_code == 200
+
+    renamed = copy.deepcopy(bundle)
+    renamed[0]["properties"]["to"] += " Station"
+    first = f"osm-{bundle[0]['properties']['osm_id']}"
+    try:
+        async with SessionLocal() as db:
+            assert await osm_routes.sync_routes(db, renamed) == [first]
+        routes = {r["id"]: r for r in client.get("/api/v1/routes").json()}
+        assert stand_in.id not in routes
+        assert routes[first]["name"].endswith(" Station")
+        gone = client.post("/api/v1/alerts/unsubscribe",
+                           json={"route_id": stand_in.id, "endpoint": sub["endpoint"]})
+        assert gone.json() == {"removed": False}
+    finally:
+        async with SessionLocal() as db:
+            assert await osm_routes.sync_routes(db, bundle) == [first]
 
 
 def test_subscribe_requires_auth():
@@ -230,15 +283,15 @@ async def test_rain_refresh_upserts_and_routes_forecast_from_it(monkeypatch):
         async with SessionLocal() as db:
             assert await rainfall.refresh_rainfall(db, limit_tiles=5000) > 0
 
-    forecasts = [client.get(f"/api/v1/routes/{r['id']}/forecast").json()
-                 for r in client.get("/api/v1/routes").json()]
-    points = [p for f in forecasts for p in f["points"]]
-    assert points, "no route crosses a refreshed tile"
+    routes = client.get("/api/v1/routes").json()
+    # Every route gets rain, including the ones running out past the risk grid.
+    assert all(r["hours"] for r in routes), "a route got no rain"
     # Updated in place: the second run's value, not a duplicate of the first.
-    assert {p["precip_mm"] for p in points} == {7.0}
-    # The route list carries the same hours, for the rain strip.
-    hours = [h for r in client.get("/api/v1/routes").json() for h in r["hours"]]
-    assert hours and {h["precip_mm"] for h in hours} == {7.0}
+    hours = [h for r in routes for h in r["hours"]]
+    assert {h["precip_mm"] for h in hours} == {7.0}
+    # The forecast endpoint reads the same hours.
+    forecast = client.get(f"/api/v1/routes/{routes[0]['id']}/forecast").json()
+    assert forecast["points"] and {p["precip_mm"] for p in forecast["points"]} == {7.0}
 
 
 def test_each_refresh_records_whether_it_saved_rain(monkeypatch):

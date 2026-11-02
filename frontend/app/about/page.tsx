@@ -32,10 +32,12 @@ export default function AboutPage() {
       <section className="card">
         <h2>Trotro alerts</h2>
         <p>
-          Every 3 hours FloodWatch fetches the rain forecast for the next day or two. Where heavy
+          FloodWatch follows about 280 trotro routes across Greater Accra, as mapped stop by stop
+          in OpenStreetMap. Every 3 hours it fetches the rain forecast along each one. Where heavy
           rain meets a route&apos;s low points, the route is flagged, and every phone that asked
           for alerts gets a notification. No account and no phone number: the alert goes to the
-          browser that asked for it.
+          browser that asked for it. Routes change, and the map may not have caught up with every
+          one.
         </p>
       </section>
 

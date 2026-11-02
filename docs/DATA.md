@@ -111,3 +111,29 @@ mis-specified prior is a large part of why the hand-tuned index only reaches
 The near-zero weight on `drainage_score` is a warning about HAND at this
 resolution, not a verdict on HAND: an H3 res-8 cell is ~0.9 km across, which is
 coarse relative to the drains that actually flood in Accra.
+
+## Trotro routes (`backend/data/trotro_routes.geojson`)
+
+Accra's trotro network is mapped in OpenStreetMap as public-transport route
+relations (network "trô trô"): one per direction, listing the roads driven and
+the stops, tagged with the union branch that runs it. `python -m
+app.etl.osm_routes build` fetches them from Overpass (with mirrors, since the
+main server is often at capacity) and:
+
+- **joins each relation's road pieces into one line**, turning pieces drawn the
+  other way round and driving roundabouts only as far as the exit;
+- **keeps one direction per pair of termini** (flooding doesn't care which way
+  you ride), the one that joined up best; its id is the lower relation id of the
+  two, so it doesn't change with which direction a rebuild keeps;
+- **fills a missing road piece along real roads.** A few relations have a road
+  piece missing. OSRM, a free router over the same OSM roads, gives the
+  drivable way between the loose ends; those lines
+  carry `filled_m`. A gap OSRM can't sensibly fill and longer than 300 m drops
+  the route rather than draw a straight line through houses.
+
+Built 2 November 2026: 564 trotro relations, 281 lines, **280 kept** (9 with a
+filled gap, 1 dropped), ~13,000 points after simplifying to ~5 m.
+
+**Be clear about what this is.** It is the network as volunteers mapped it.
+Routes change, and some may have moved since; nothing here checks a route
+against today's trotros. Route data (c) OpenStreetMap contributors, ODbL 1.0.

@@ -42,11 +42,17 @@ export interface RouteSummary {
   baseline_risk: number;
   current_status: RouteStatus;
   active_alert: boolean;
-  /** [lng, lat] pairs, ready for GeoJSON. */
-  path: [number, number][];
-  /** The coming hours of rain the status was judged on. */
+  /** The coming hours of rain the status was judged on. Empty until the
+   * first rain check after the route was added. */
   hours: RouteHour[];
 }
+
+/** Every route's line, from OpenStreetMap. Apart from the statuses because it
+ * only changes with a deploy, so the browser keeps it. */
+export type RouteLines = GeoJSON.FeatureCollection<
+  GeoJSON.LineString,
+  { id: string; name: string }
+>;
 
 /** The latest scheduled rain check, and whether it saved anything. */
 export interface RefreshRun {
@@ -117,8 +123,8 @@ async function request<T>(
   token?: string | null
 ): Promise<T> {
   const res = await fetch(`${API}${path}`, {
-    ...init,
     cache: "no-store",
+    ...init,
     headers: {
       ...init?.headers,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -154,6 +160,8 @@ export const api = {
       `/risk/tiles?bbox=${bbox}&res=${res}`
     ),
   routes: () => get<RouteSummary[]>(`/routes`),
+  /** ~60 kB compressed; the browser's own cache keeps it between visits. */
+  routeLines: () => request<RouteLines>(`/routes/lines`, { cache: "default" }),
   alerts: () => get<Alert[]>(`/alerts`),
   /** 503 when the server has no VAPID keys — push is simply off. */
   vapidKey: () => get<{ public_key: string }>(`/alerts/vapid-key`),

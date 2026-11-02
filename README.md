@@ -94,6 +94,7 @@ OpenAPI docs are served at `/docs` (Swagger) and `/redoc`. Key endpoints:
 | GET    | `/api/v1/risk/tiles?bbox=&res=`   | H3 risk tiles (GeoJSON) for a bbox        |
 | GET    | `/api/v1/risk/area?name=`         | risk for a named area (e.g. Kaneshie)     |
 | GET    | `/api/v1/routes`                  | trotro routes with current flood status   |
+| GET    | `/api/v1/routes/lines`            | every route's line as GeoJSON (cacheable) |
 | GET    | `/api/v1/routes/{id}/forecast`    | route flood forecast from rainfall        |
 | GET    | `/api/v1/alerts`                  | active route alerts                       |
 | POST   | `/api/v1/alerts/subscribe`        | push alerts for a route (no account needed) |
