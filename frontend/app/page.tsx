@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
+import InstallPromo from "@/components/InstallPromo";
 import PlaceSearch from "@/components/PlaceSearch";
 import RiskResult, { ResultSkeleton } from "@/components/RiskResult";
 import RouteRows from "@/components/RouteRows";
@@ -330,6 +331,7 @@ export default function Home() {
               </span>
               <ChevronIcon />
             </Link>
+            <InstallPromo />
           </div>
         )}
       </Sheet>

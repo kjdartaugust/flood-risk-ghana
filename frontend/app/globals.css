@@ -860,6 +860,24 @@ h3 {
   color: #fff;
 }
 
+/* The install offer: a promo that's a button, under the alerts one. */
+button.promo,
+.promo + .promo {
+  width: 100%;
+  margin-top: 10px;
+  border: 0;
+  text-align: left;
+}
+
+div.promo:hover {
+  background: var(--fill);
+}
+
+.promo-icon.quiet {
+  background: var(--surface);
+  color: var(--brand);
+}
+
 /* ── The answer ───────────────────────────────────────────────────────────── */
 
 .result {

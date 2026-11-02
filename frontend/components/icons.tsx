@@ -57,6 +57,15 @@ export const BellIcon = ({ size = 18 }: { size?: number }) => (
   </Icon>
 );
 
+/** Down onto a home screen: install the app. */
+export const InstallIcon = ({ size = 20 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M12 3v11" />
+    <path d="m7 9 5 5 5-5" />
+    <path d="M5 20h14" />
+  </Icon>
+);
+
 /** A minibus, for trotro routes. */
 export const BusIcon = ({ size = 20 }: { size?: number }) => (
   <Icon size={size}>

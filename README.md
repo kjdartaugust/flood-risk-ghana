@@ -7,8 +7,11 @@ A production flood-risk platform for Ghana. Two combined features:
    historical flood records, rainfall time-series, elevation/DEM, drainage/slope,
    land cover, and known Accra hotspots (Kaneshie, Circle, Adabraka, Alajo).
 2. **Trotro route flood alerts** — combines the risk layer with live/forecast rainfall
-   to predict which trotro routes flood before and during rain, and pushes route-level
-   warnings to commuters.
+   to predict which of Accra's ~280 trotro routes (from OpenStreetMap) flood before and
+   during rain, and pushes route-level warnings to commuters.
+
+The site installs as an app (Android "Install app", iPhone "Add to Home Screen"),
+which is also how iPhones get the alerts: iOS only lets a Home Screen web app push.
 
 ## Architecture
 
