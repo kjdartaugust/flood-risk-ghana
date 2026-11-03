@@ -85,10 +85,14 @@ fallback.
 2. **The job.** cron-job.org → **Create cronjob**:
    - URL: `https://api.github.com/repos/kjdartaugust/flood-risk-ghana/actions/workflows/refresh.yml/dispatches`
      (on a fork, your own owner/repo).
-   - Schedule: custom, minute 17 of hours 0, 3, 6, 9, 12, 15, 18 and 21 (UTC, which
-     is also Ghana time).
-   - Advanced: request method **POST**; a header named `Authorization` whose value
-     is `Bearer ` followed by the key; request body `{"ref":"main"}`.
+   - Schedule: **Custom**, with the crontab expression `17 */3 * * *` (minute 17 of
+     every third hour).
+   - Advanced: time zone **UTC** (also Ghana time). A new job takes the account's
+     time zone, which may be a different one, and the job would then run on that
+     zone's hours. Request method **POST**; a header named `Authorization` whose
+     value is `Bearer ` followed by the key; request body `{"ref":"main"}`.
+     cron-job.org then suggests a `Content-Type` header for JSON; GitHub doesn't
+     need one.
    - Notifications: on when the job fails, so an expired key gets noticed.
 3. **Test run.** GitHub answers `204`, and a `workflow_dispatch` run of **refresh**
    appears in the Actions tab. `401` means the key is wrong or has expired; `403` or
