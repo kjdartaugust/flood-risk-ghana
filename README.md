@@ -168,10 +168,14 @@ breaks down.
 
 Render's free plan has no background workers, so the rainfall + route-alert cycle
 runs as an external cron: [`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)
-POSTs to `/api/v1/internal/refresh` every 3 hours.
+POSTs to `/api/v1/internal/refresh` every 3 hours. GitHub runs scheduled workflows
+late or skips them when it's busy, so a free cron-job.org job starts the workflow on
+time through GitHub's API, and the workflow's own schedule is the fallback (setup:
+[docs/DEPLOY.md](docs/DEPLOY.md), section 5). Runs take turns, so an alert can't go
+out twice.
 
-There are no secrets to set up — only the `BACKEND_URL` repository secret, so the
-workflow knows where to call:
+Between GitHub and the backend there are no secrets to set up — only the
+`BACKEND_URL` repository secret, so the workflow knows where to call:
 
 - **The cron proves who it is with a GitHub Actions OIDC token**: a short-lived
   token GitHub signs, naming the repo and workflow. The backend checks GitHub's
@@ -191,7 +195,8 @@ The workflow also **fetches the rain itself** and posts it with the trigger.
 Open-Meteo's free API limits each IP per day, and Render's free tier shares one
 outbound IP among many apps, so requests from the backend get "Daily API request
 limit exceeded". The backend says what to fetch (`GET /api/v1/internal/refresh/plan`:
-about 26 sample points, since the weather model's grid is ~10 km), and still
+about 40 sample points, one per ~5 km grid cell that holds a risk tile or that a
+trotro route passes through), and still
 fetches for itself when nothing is posted.
 
 The `202` only means a run started. Each run is recorded, and
