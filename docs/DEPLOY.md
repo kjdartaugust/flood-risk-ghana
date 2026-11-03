@@ -3,8 +3,8 @@
 Free-tier stack, three moving parts: **database** (Neon Postgres + PostGIS),
 **backend** (Docker → Render web service), and **frontend** (Next.js → Vercel).
 No paid upgrades required. Render background workers are *not* free, so the
-scheduled ETL worker is omitted from the live deploy (run it locally, or add it
-later on a paid plan / external cron).
+rain checks run in GitHub Actions instead, started on time by a free cron-job.org
+job (section 5).
 
 ## 1. Database — Neon
 
@@ -66,6 +66,37 @@ to score a point, then submit a **community flood report**. It writes a
 curl "https://<backend>/api/v1/reports/recent?limit=5"
 ```
 
+## 5. Rain checks on time — cron-job.org
+
+The rain + alert cycle runs in GitHub Actions (`.github/workflows/refresh.yml`; see
+"Scheduled refresh" in the README). GitHub's own schedule can't be relied on: it
+runs scheduled workflows late, or skips them, when it's busy (on 2–3 Nov 2026 only
+2 of 8 ran). So a free [cron-job.org](https://cron-job.org) job starts the workflow
+every 3 hours through GitHub's API, and the workflow's own schedule stays as the
+fallback.
+
+1. **A key that can only start workflows.** GitHub → Settings → Developer settings
+   → Personal access tokens → **Fine-grained tokens** → Generate new token.
+   - Repository access: **Only select repositories**, then this repo.
+   - Permissions: **Actions: Read and write**. Nothing else.
+   - Expiration: your call, up to a year. The timer stops when the key expires.
+
+   The key (`github_pat_…`) is shown once: paste it straight into step 2.
+2. **The job.** cron-job.org → **Create cronjob**:
+   - URL: `https://api.github.com/repos/kjdartaugust/flood-risk-ghana/actions/workflows/refresh.yml/dispatches`
+     (on a fork, your own owner/repo).
+   - Schedule: custom, minute 17 of hours 0, 3, 6, 9, 12, 15, 18 and 21 (UTC, which
+     is also Ghana time).
+   - Advanced: request method **POST**; a header named `Authorization` whose value
+     is `Bearer ` followed by the key; request body `{"ref":"main"}`.
+   - Notifications: on when the job fails, so an expired key gets noticed.
+3. **Test run.** GitHub answers `204`, and a `workflow_dispatch` run of **refresh**
+   appears in the Actions tab. `401` means the key is wrong or has expired; `403` or
+   `404` means it can't run workflows on this repo.
+
+Runs never overlap (the workflow's `concurrency` group), so when the timer and the
+fallback fire together, one simply waits for the other.
+
 ## Redeploy cheatsheet
 
 | Piece    | Auto                              | Manual                                  |
@@ -74,11 +105,10 @@ curl "https://<backend>/api/v1/reports/recent?limit=5"
 | Backend  | push to `main` (`autoDeploy`)     | Render → Manual Deploy → latest commit  |
 | Database | n/a (persistent)                  | schema via `alembic upgrade head` on boot |
 
-## Scheduled ETL (optional, not on free tier)
-The worker (`app/etl/worker.py`) runs `RAINFALL_REFRESH_CRON` (default 30 min):
-refresh rainfall from Open-Meteo/GPM, re-evaluate route alerts. Run it locally
-(`python -m app.etl.worker`) or add a paid Render worker / external cron hitting
-`python -m app.etl.worker --once`.
+## Rain checks locally
+`app/etl/worker.py` runs the same cycle on `RAINFALL_REFRESH_CRON` (default 30 min)
+for local development: `python -m app.etl.worker`, or `--once` for a single run.
+Production doesn't deploy it (no free background workers) and uses section 5.
 
 ## Upgrading the model
 ```bash

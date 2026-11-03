@@ -9,6 +9,11 @@
 # rainfall and re-evaluate route flood alerts — the service is free to sleep in
 # between, and the first call after a sleep just eats the cold start.
 #
+# GitHub runs scheduled workflows late, or not at all, when it's busy, so the
+# schedule below is only the fallback. What starts this on time is an outside
+# timer: a free cron-job.org job that asks GitHub's API to run this workflow
+# every 3 hours (set up in docs/DEPLOY.md, section 5).
+#
 # No shared secret: the job asks GitHub for a short-lived signed token (OIDC)
 # naming this repo and this workflow, and the backend checks GitHub's signature.
 # The one setting is where the backend lives, as a repository secret:
@@ -17,14 +22,22 @@ name: refresh
 
 on:
   schedule:
-    # Every 3 hours, at 17 minutes past rather than on the hour. GitHub delays
-    # and drops scheduled runs at busy times, the top of the hour worst of all:
-    # on "0 */3" only 3 or 4 of the day's 8 runs happened, up to an hour late.
+    # The fallback: every 3 hours, at 17 minutes past. GitHub delays and drops
+    # scheduled runs at busy times, the top of the hour worst of all: on "0 */3"
+    # only 3 or 4 of the day's 8 runs happened, and on "17 */3" only 2 of 8
+    # (2-3 Nov 2026).
     - cron: "17 */3 * * *"
-  workflow_dispatch: # lets you trigger a refresh by hand from the Actions tab
+  workflow_dispatch: # the outside timer, or you by hand from the Actions tab
 
 permissions:
   id-token: write # lets the job ask GitHub for the token that proves who it is
+
+# The timer and the fallback can fire together. Two refreshes at once would each
+# miss the alerts the other just raised and send the same alert twice, so a
+# second run waits until the first has finished.
+concurrency:
+  group: refresh
+  cancel-in-progress: false
 
 jobs:
   refresh:
