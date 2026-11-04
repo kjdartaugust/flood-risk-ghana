@@ -80,6 +80,10 @@ fallback.
    - Repository access: **Only select repositories**, then this repo.
    - Permissions: **Actions: Read and write**. Nothing else.
    - Expiration: your call, up to a year. The timer stops when the key expires.
+     Pick the date by hand, then check that the box GitHub shows before generating
+     names that date. If it says the key will never expire, the date didn't take
+     (one past the limit does that), and **Generate token** then does nothing, with
+     no message.
 
    The key (`github_pat_…`) is shown once: paste it straight into step 2.
 2. **The job.** cron-job.org → **Create cronjob**:
