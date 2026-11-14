@@ -212,6 +212,8 @@ export default function RiskMap({
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const marker = useRef<Marker | null>(null);
+  const pad = useRef(padding);
+  pad.current = padding;
   const tiles = useRef<GeoJSON.FeatureCollection>({ type: "FeatureCollection", features: [] });
   const drawn = useRef<GeoJSON.FeatureCollection>(routesGeoJSON(lines, routes));
   const open = useRef(route);
@@ -233,6 +235,10 @@ export default function RiskMap({
       touchPitch: false,
     });
     map.current = m;
+    // The sheet's room lives on the map itself, not on each move: MapLibre keeps a move's padding
+    // afterwards and adds the next move's on top, so a fly-to followed by framing a route counted
+    // the sheet twice, and on a phone the frame didn't fit and silently didn't happen.
+    m.setPadding(pad.current);
     m.touchZoomRotate.disableRotation();
     // The tiles carry their own credit (OpenFreeMap, OpenMapTiles,
     // OpenStreetMap). Full text on desktop; behind the standard "i" on phones.
@@ -356,6 +362,11 @@ export default function RiskMap({
     marker.current.setLngLat([pin.lng, pin.lat]).addTo(m);
   }, [pin?.lat, pin?.lng, pinColor]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const padKey = [padding.top, padding.right, padding.bottom, padding.left].join(",");
+  useEffect(() => {
+    map.current?.setPadding(pad.current);
+  }, [padKey]);
+
   useEffect(() => {
     const m = map.current;
     if (!m || !focus) return;
@@ -363,7 +374,6 @@ export default function RiskMap({
       center: [focus.lng, focus.lat],
       // Close enough to read the streets, far enough to see the neighbourhood.
       zoom: focus.zoomIn ? Math.max(m.getZoom(), 13) : m.getZoom(),
-      padding,
       essential: true,
       duration: 1100,
     });
@@ -375,14 +385,9 @@ export default function RiskMap({
     const [lng, lat] = fit.path[0];
     const bounds = new maplibregl.LngLatBounds([lng, lat], [lng, lat]);
     for (const [x, y] of fit.path) bounds.extend([x, y]);
-    const room = 28;
+    // On top of the sheet's room, which the map already holds.
     m.fitBounds(bounds, {
-      padding: {
-        top: padding.top + room,
-        bottom: padding.bottom + room,
-        left: padding.left + room,
-        right: padding.right + room,
-      },
+      padding: 28,
       maxZoom: 14.5,
       duration: 900,
     });
