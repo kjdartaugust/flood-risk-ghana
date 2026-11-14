@@ -72,8 +72,9 @@ The rain + alert cycle runs in GitHub Actions (`.github/workflows/refresh.yml`; 
 "Scheduled refresh" in the README). GitHub's own schedule can't be relied on: it
 runs scheduled workflows late, or skips them, when it's busy (on 2–3 Nov 2026 only
 2 of 8 ran). So a free [cron-job.org](https://cron-job.org) job starts the workflow
-every 3 hours through GitHub's API, and the workflow's own schedule stays as the
-fallback.
+every 3 hours through GitHub's API. This is optional now: the workflow's own
+schedule tries every hour and refreshes whenever the last refresh is 2.5 hours old,
+so dropped runs are made up within the hour without it.
 
 1. **A key that can only start workflows.** GitHub → Settings → Developer settings
    → Personal access tokens → **Fine-grained tokens** → Generate new token.
