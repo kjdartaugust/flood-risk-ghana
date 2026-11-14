@@ -10,8 +10,8 @@
 # between, and the first call after a sleep just eats the cold start.
 #
 # GitHub runs scheduled workflows late, or not at all, when it's busy, so the
-# schedule below is only the fallback. What starts this on time is an outside
-# timer: a free cron-job.org job that asks GitHub's API to run this workflow
+# schedule below tries every hour (see there). An outside timer can start it on
+# time as well: a free cron-job.org job that asks GitHub's API to run this workflow
 # every 3 hours (set up in docs/DEPLOY.md, section 5).
 #
 # No shared secret: the job asks GitHub for a short-lived signed token (OIDC)
@@ -22,15 +22,17 @@ name: refresh
 
 on:
   schedule:
-    # The fallback: every 3 hours, at 17 minutes past. GitHub delays and drops
-    # scheduled runs at busy times, the top of the hour worst of all: on "0 */3"
-    # only 3 or 4 of the day's 8 runs happened, and on "17 */3" only 2 of 8
-    # (2-3 Nov 2026).
-    - cron: "17 */3 * * *"
+    # GitHub delays and drops scheduled runs at busy times, the top of the hour
+    # worst of all: on "0 */3" only 3 or 4 of the day's 8 runs happened, on
+    # "17 */3" only 2 of 8 (2-3 Nov 2026), and 26 in the 8 days to 13 Nov. So it
+    # tries every hour, and the `due` job below lets a try through only when the
+    # last refresh is 2.5 hours old: still one refresh about every 3 hours, but
+    # a dropped try is made up within the hour instead of waiting for the next
+    # slot. A skipped try is a few seconds of GitHub's time; it doesn't wake the
+    # backend or call Open-Meteo.
+    - cron: "43 * * * *"
   workflow_dispatch: # the outside timer, or you by hand from the Actions tab
 
-permissions:
-  id-token: write # lets the job ask GitHub for the token that proves who it is
 
 # The timer and the fallback can fire together. Two refreshes at once would each
 # miss the alerts the other just raised and send the same alert twice, so a
@@ -40,8 +42,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  refresh:
+  due:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read # to see when this workflow last refreshed
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          # The outside timer, or you by hand: always go.
+          if [ "$EVENT" != "schedule" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # When did a refresh last actually run and succeed? A skipped try also
+          # ends green, so look at the refresh job itself, not the run.
+          last=""
+          for id in $(gh api "repos/$REPO/actions/workflows/refresh.yml/runs?status=success&per_page=20"                         --jq '.workflow_runs[].id'); do
+            last=$(gh api "repos/$REPO/actions/runs/$id/jobs"               --jq '.jobs[] | select(.name == "refresh" and .conclusion == "success") | .started_at')
+            [ -n "$last" ] && break
+          done
+          if [ -z "$last" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          age=$(( ($(date +%s) - $(date -d "$last" +%s)) / 60 ))
+          echo "Last refresh started $age minutes ago ($last)."
+          if [ "$age" -ge 150 ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "go=false" >> "$GITHUB_OUTPUT"; fi
+
+  refresh:
+    needs: due
+    if: needs.due.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # lets the job ask GitHub for the token that proves who it is
     steps:
       - name: Trigger rainfall + alert refresh
         env:
