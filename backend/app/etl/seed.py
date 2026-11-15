@@ -14,7 +14,7 @@ import os
 
 from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.config import settings
 from app.db import SessionLocal
@@ -35,6 +35,12 @@ INCIDENTS_CSV = os.path.join(os.path.dirname(__file__), "..", "..", "data",
 EVENT_DATE = dt.date(2015, 6, 3)
 EVENT_SEVERITY = 3
 SOURCE = "public-reporting:2015-06-03-accra-flood"
+# The first version of this seed wrote a hand-made list under this source, with
+# per-area dates (2016-2025) and severities nobody had recorded. A database
+# seeded back then still holds those rows, and because seeding skipped whenever
+# any event existed, the real list above never replaced them. They go; riders'
+# own reports (source "community") stay.
+LEGACY_SOURCE = "historical-compilation"
 
 
 def load_incidents() -> list[dict]:
@@ -47,24 +53,33 @@ def load_incidents() -> list[dict]:
         return [r for r in csv.DictReader(fh) if r["flood_reported"] == "1"]
 
 
-async def seed_flood_events() -> int:
+async def seed_flood_events() -> bool:
+    """Make the recorded history the real one. True if it changed (re-tile then:
+    each tile bakes in the flood history around it)."""
     incidents = load_incidents()
     async with SessionLocal() as db:
-        count = (await db.execute(select(func.count(FloodEvent.id)))).scalar()
-        if count and count > 0:
-            log.info("flood_events already seeded (%d)", count)
-            return count
-        for r in incidents:
-            db.add(FloodEvent(
-                occurred_on=EVENT_DATE, area_name=r["area_name"],
-                severity=EVENT_SEVERITY, source=SOURCE,
-                notes=(f"{r['area_name']} reported flooded in the 3 June 2015 "
-                       "Accra flood disaster; coordinates geocoded from OSM."),
-                geom=from_shape(Point(float(r["lng"]), float(r["lat"])),
-                                srid=4326)))
+        legacy = (await db.execute(
+            delete(FloodEvent).where(FloodEvent.source == LEGACY_SOURCE)
+        )).rowcount or 0
+        if legacy:
+            log.info("removed %d made-up flood events (%s)", legacy, LEGACY_SOURCE)
+        have = (await db.execute(
+            select(func.count(FloodEvent.id)).where(FloodEvent.source == SOURCE)
+        )).scalar() or 0
+        if have:
+            log.info("flood_events already seeded (%d)", have)
+        else:
+            for r in incidents:
+                db.add(FloodEvent(
+                    occurred_on=EVENT_DATE, area_name=r["area_name"],
+                    severity=EVENT_SEVERITY, source=SOURCE,
+                    notes=(f"{r['area_name']} reported flooded in the 3 June 2015 "
+                           "Accra flood disaster; coordinates geocoded from OSM."),
+                    geom=from_shape(Point(float(r["lng"]), float(r["lat"])),
+                                    srid=4326)))
+            log.info("seeded %d flood events", len(incidents))
         await db.commit()
-        log.info("seeded %d flood events", len(incidents))
-        return len(incidents)
+        return bool(legacy) or (not have and bool(incidents))
 
 
 async def _count(model) -> int:
@@ -97,8 +112,8 @@ async def _tiles_are_stale() -> bool:
 
 
 async def main() -> None:
-    await seed_flood_events()
-    retiled = await _tiles_are_stale()
+    history_changed = await seed_flood_events()
+    retiled = history_changed or await _tiles_are_stale()
     if retiled:
         async with SessionLocal() as db:
             # Populate the risk grid first so routes can compute baseline risk.
