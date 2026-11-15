@@ -169,10 +169,10 @@ breaks down.
 Render's free plan has no background workers, so the rainfall + route-alert cycle
 runs as an external cron: [`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)
 POSTs to `/api/v1/internal/refresh` every 3 hours. GitHub runs scheduled workflows
-late or skips them when it's busy, so the schedule tries every hour and a try goes
-ahead only when the last refresh is 2.5 hours old: a dropped try is made up within the
-hour. A free cron-job.org job can also start it on time through GitHub's API (optional;
-setup: [docs/DEPLOY.md](docs/DEPLOY.md), section 5). Runs take turns, so an alert can't go
+late or skips them when it's busy, so the runs form a chain: each one starts the
+next, which waits until 3 hours after the last refresh. The hourly schedule is only a
+backup that restarts the chain if it breaks. A free cron-job.org job can also start a
+run through GitHub's API (optional; setup: [docs/DEPLOY.md](docs/DEPLOY.md), section 5). Runs take turns, so an alert can't go
 out twice.
 
 Between GitHub and the backend there are no secrets to set up — only the
