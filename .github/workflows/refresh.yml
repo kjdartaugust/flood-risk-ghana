@@ -9,41 +9,37 @@
 # rainfall and re-evaluate route flood alerts — the service is free to sleep in
 # between, and the first call after a sleep just eats the cold start.
 #
-# GitHub runs scheduled workflows late, or not at all, when it's busy, so the
-# schedule below tries every hour (see there). An outside timer can start it on
-# time as well: a free cron-job.org job that asks GitHub's API to run this workflow
-# every 3 hours (set up in docs/DEPLOY.md, section 5).
+# What keeps it going is a chain: each run, when it's done, starts the next one
+# (workflow_dispatch with chain=true), and that run waits until 3 hours after
+# the last refresh before refreshing. GitHub's own schedule drops most runs at
+# busy times (26 of 64 in the 8 days to 13 Nov 2026; 4 of 28 hourly tries on
+# 14-15 Nov), so it's only the backup that restarts the chain if it ever breaks.
+# The waiting is a sleeping runner, which costs nothing on a public repo.
+# An outside timer (cron-job.org, docs/DEPLOY.md section 5) is optional.
 #
 # No shared secret: the job asks GitHub for a short-lived signed token (OIDC)
 # naming this repo and this workflow, and the backend checks GitHub's signature.
 # The one setting is where the backend lives, as a repository secret:
 #   BACKEND_URL  e.g. https://floodwatch-backend-dlni.onrender.com
 name: refresh
+run-name: ${{ inputs.chain && 'refresh (chain)' || 'refresh' }}
 
 on:
   schedule:
-    # GitHub delays and drops scheduled runs at busy times, the top of the hour
-    # worst of all: on "0 */3" only 3 or 4 of the day's 8 runs happened, on
-    # "17 */3" only 2 of 8 (2-3 Nov 2026), and 26 in the 8 days to 13 Nov. So it
-    # tries every hour, and the `due` job below lets a try through only when the
-    # last refresh is 2.5 hours old: still one refresh about every 3 hours, but
-    # a dropped try is made up within the hour instead of waiting for the next
-    # slot. A skipped try is a few seconds of GitHub's time; it doesn't wake the
-    # backend or call Open-Meteo.
+    # The backup: if no chain run is alive, a try starts one (and refreshes now
+    # if the last refresh is 2.5 hours old). Hourly, off the top of the hour.
     - cron: "43 * * * *"
-  workflow_dispatch: # the outside timer, or you by hand from the Actions tab
-
-
-# The timer and the fallback can fire together. Two refreshes at once would each
-# miss the alerts the other just raised and send the same alert twice, so a
-# second run waits until the first has finished.
-concurrency:
-  group: refresh
-  cancel-in-progress: false
+  workflow_dispatch: # the chain, the outside timer, or you from the Actions tab
+    inputs:
+      chain:
+        description: "Started by the previous run: wait until 3 hours after the last refresh"
+        type: boolean
+        default: false
 
 jobs:
   due:
     runs-on: ubuntu-latest
+    timeout-minutes: 200
     permissions:
       actions: read # to see when this workflow last refreshed
     outputs:
@@ -54,19 +50,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
+          CHAIN: ${{ inputs.chain }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          # The outside timer, or you by hand: always go.
-          if [ "$EVENT" != "schedule" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          # When did a refresh last actually run and succeed? A skipped try also
-          # ends green, so look at the refresh job itself, not the run.
+          # When did a refresh last run, well or not? (Not just the last good one:
+          # if the backend is down, the chain must still wait its 3 hours rather
+          # than retry in a tight loop.) A skipped try has no refresh job, so look
+          # at the job itself, not the run. Any API failure here fails this job,
+          # which also stops the chain; the backup schedule restarts it.
+          runs=$(gh api "repos/$REPO/actions/workflows/refresh.yml/runs?status=completed&per_page=20" --jq '.workflow_runs[].id')
           last=""
-          for id in $(gh api "repos/$REPO/actions/workflows/refresh.yml/runs?status=success&per_page=20"                         --jq '.workflow_runs[].id'); do
-            last=$(gh api "repos/$REPO/actions/runs/$id/jobs"               --jq '.jobs[] | select(.name == "refresh" and .conclusion == "success") | .started_at')
+          for id in $runs; do
+            last=$(gh api "repos/$REPO/actions/runs/$id/jobs" --jq '.jobs[] | select(.name == "refresh" and (.conclusion == "success" or .conclusion == "failure")) | .started_at')
             [ -n "$last" ] && break
           done
-          if [ -z "$last" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          age=$(( ($(date +%s) - $(date -d "$last" +%s)) / 60 ))
-          echo "Last refresh started $age minutes ago ($last)."
+          age=999
+          [ -n "$last" ] && age=$(( ($(date +%s) - $(date -d "$last" +%s)) / 60 ))
+          echo "Last refresh started $age minutes ago (${last:-never})."
+
+          if [ "$CHAIN" = "true" ]; then
+            wait=$(( 180 - age )); [ "$wait" -gt 175 ] && wait=175
+            if [ "$wait" -gt 0 ]; then echo "Waiting $wait minutes."; sleep $(( wait * 60 )); fi
+            echo "go=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # The outside timer, or you by hand: always go.
+          if [ "$EVENT" != "schedule" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # The backup schedule: leave it to the chain while one is alive.
+          alive=$(gh api "repos/$REPO/actions/workflows/refresh.yml/runs?per_page=30" \
+            --jq "[.workflow_runs[] | select(.id != $RUN_ID and .display_title == \"refresh (chain)\" and (.status == \"in_progress\" or .status == \"queued\" or .status == \"waiting\" or .status == \"pending\"))] | length")
+          if [ "$alive" -gt 0 ]; then echo "A chain run is alive; nothing to do."; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           if [ "$age" -ge 150 ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "go=false" >> "$GITHUB_OUTPUT"; fi
 
   refresh:
@@ -75,6 +87,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write # lets the job ask GitHub for the token that proves who it is
+    # Two refreshes at once would each miss the alerts the other just raised and
+    # send the same alert twice, so a second one waits for the first.
+    concurrency:
+      group: refresh
+      cancel-in-progress: false
     steps:
       - name: Trigger rainfall + alert refresh
         env:
@@ -150,3 +167,27 @@ jobs:
           done
           echo "::error::refresh $run had not finished after 5 minutes"
           exit 1
+
+  # Start the next run, whatever happened here (a failed refresh mustn't break
+  # the chain), unless another chain run is already alive: the backup schedule
+  # and a hand-started run join the chain instead of starting a second one.
+  next:
+    needs: [due, refresh]
+    # Not when `due` itself failed: then the next run would fail the same way at
+    # once, and so on. The backup schedule picks the chain up again.
+    if: always() && needs.due.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # to start this workflow again
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REF: ${{ github.ref_name }}
+        run: |
+          alive=$(gh api "repos/$REPO/actions/workflows/refresh.yml/runs?per_page=30" \
+            --jq "[.workflow_runs[] | select(.id != $RUN_ID and .display_title == \"refresh (chain)\" and (.status == \"in_progress\" or .status == \"queued\" or .status == \"waiting\" or .status == \"pending\"))] | length")
+          if [ "$alive" -gt 0 ]; then echo "A chain run is already alive."; exit 0; fi
+          gh workflow run refresh.yml -R "$REPO" --ref "$REF" -f chain=true
+          echo "Started the next run."
