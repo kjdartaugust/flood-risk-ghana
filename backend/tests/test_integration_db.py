@@ -356,3 +356,39 @@ def test_refresh_saves_rain_the_caller_fetched_as_planned(monkeypatch):
     run = client.get("/api/v1/internal/refresh").json()
     assert run["id"] == started.json()["run"]
     assert run["error"] is None and run["rainfall_rows"] > 0
+
+
+@pytest.mark.asyncio
+async def test_seed_replaces_made_up_history_and_keeps_riders_reports():
+    from geoalchemy2.shape import from_shape as _shape
+    from shapely.geometry import Point
+    from sqlalchemy import delete, func, select
+
+    from app.etl import seed
+    from app.models import FloodEvent
+
+    here = _shape(Point(-0.2360, 5.5620), srid=4326)
+    rider = str(uuid.uuid4())
+    async with SessionLocal() as db:
+        # A database seeded by the first version: a made-up row, no real list yet.
+        await db.execute(delete(FloodEvent).where(FloodEvent.source == seed.SOURCE))
+        db.add(FloodEvent(occurred_on=dt.date(2018, 6, 18), area_name="Kaneshie",
+                          severity=3, source=seed.LEGACY_SOURCE, geom=here))
+        db.add(FloodEvent(id=rider, occurred_on=dt.date(2026, 7, 6), area_name="Kaneshie",
+                          severity=2, source="community", geom=here))
+        await db.commit()
+
+    assert await seed.seed_flood_events() is True
+
+    async with SessionLocal() as db:
+        by_source = dict((await db.execute(
+            select(FloodEvent.source, func.count()).group_by(FloodEvent.source)
+        )).all())
+        assert seed.LEGACY_SOURCE not in by_source
+        assert by_source[seed.SOURCE] == len(seed.load_incidents())
+        assert await db.get(FloodEvent, rider) is not None
+        await db.execute(delete(FloodEvent).where(FloodEvent.id == rider))
+        await db.commit()
+
+    # Nothing left to change: a later boot doesn't re-tile for it.
+    assert await seed.seed_flood_events() is False
