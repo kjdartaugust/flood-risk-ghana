@@ -56,9 +56,11 @@ jobs:
           # When did a refresh last run, well or not? (Not just the last good one:
           # if the backend is down, the chain must still wait its 3 hours rather
           # than retry in a tight loop.) A skipped try has no refresh job, so look
-          # at the job itself, not the run. Any API failure here fails this job,
-          # which also stops the chain; the backup schedule restarts it.
-          runs=$(gh api "repos/$REPO/actions/workflows/refresh.yml/runs?status=completed&per_page=20" --jq '.workflow_runs[].id')
+          # at the job itself, not the run. Include runs still going: the run that
+          # started this one is still in its `next` job, its refresh already done.
+          # Any API failure here fails this job, which also stops the chain; the
+          # backup schedule restarts it.
+          runs=$(gh api "repos/$REPO/actions/workflows/refresh.yml/runs?per_page=20" --jq ".workflow_runs[] | select(.id != $RUN_ID) | .id")
           last=""
           for id in $runs; do
             last=$(gh api "repos/$REPO/actions/runs/$id/jobs" --jq '.jobs[] | select(.name == "refresh" and (.conclusion == "success" or .conclusion == "failure")) | .started_at')
