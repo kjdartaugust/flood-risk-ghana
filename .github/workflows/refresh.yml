@@ -170,6 +170,32 @@ jobs:
           echo "::error::refresh $run had not finished after 5 minutes"
           exit 1
 
+  # Tell the trotro trip planner there's a new forecast, while the backend is
+  # still awake to hand it over. TroTro (github.com/kjdartaugust/trotro-optimizer)
+  # warns riders when a ride is expected to flood, from a copy of GET /routes that
+  # it keeps for just under 3 hours and fetches afresh the next time it's asked.
+  # Asked now, that fetch finds the backend awake. Asked later by a rider, it
+  # would have to wake it: about 100 s, and hours off Render's free allowance.
+  # It is only an ask. Nothing here can fail the run or hold up the chain, and a
+  # fork doesn't do it at all.
+  tell:
+    needs: refresh
+    if: needs.refresh.result == 'success' && github.repository == 'kjdartaugust/flood-risk-ghana'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions: {}
+    steps:
+      - env:
+          FEED: https://frontend-blush-five-v3pge1dl9r.vercel.app/api/flood
+        run: |
+          # The first ask gets the kept copy and sets a fresh one going behind
+          # it; the second, a little later, shows what it got.
+          curl -sS -o /dev/null --max-time 30 "$FEED" || true
+          sleep 25
+          curl -sS --max-time 30 "$FEED" \
+            | jq -c '{read, checked, hours: (.hours | length), lines: (.lines | length)}' \
+            || echo "::notice::TroTro's copy of the forecast could not be read; it will catch up when a rider asks."
+
   # Start the next run, whatever happened here (a failed refresh mustn't break
   # the chain), unless another chain run is already alive: the backup schedule
   # and a hand-started run join the chain instead of starting a second one.
