@@ -175,6 +175,11 @@ backup that restarts the chain if it breaks. A free cron-job.org job can also st
 run through GitHub's API (optional; setup: [docs/DEPLOY.md](docs/DEPLOY.md), section 5). Runs take turns, so an alert can't go
 out twice.
 
+After a refresh that saved rain, the run also tells
+[TroTro](https://github.com/kjdartaugust/trotro-optimizer), the trotro trip planner, which warns
+riders when a ride is expected to flood from a copy of `GET /routes`: asked while this backend is
+still awake, TroTro picks the new forecast up without a rider ever having to wake it.
+
 Between GitHub and the backend there are no secrets to set up — only the
 `BACKEND_URL` repository secret, so the workflow knows where to call:
 
