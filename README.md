@@ -170,7 +170,9 @@ Render's free plan has no background workers, so the rainfall + route-alert cycl
 runs as an external cron: [`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)
 POSTs to `/api/v1/internal/refresh` every 3 hours. GitHub runs scheduled workflows
 late or skips them when it's busy, so the runs form a chain: each one starts the
-next, which waits until 3 hours after the last refresh. The hourly schedule is only a
+next, which waits until 3 hours after the last refresh, or 30 minutes after one that
+failed (once: if that retry fails too, the next try is the usual 3 hours on, so an
+outage doesn't wake the backend over and over). The hourly schedule is only a
 backup that restarts the chain if it breaks. A free cron-job.org job can also start a
 run through GitHub's API (optional; setup: [docs/DEPLOY.md](docs/DEPLOY.md), section 5). Runs take turns, so an alert can't go
 out twice.
@@ -203,7 +205,10 @@ outbound IP among many apps, so requests from the backend get "Daily API request
 limit exceeded". The backend says what to fetch (`GET /api/v1/internal/refresh/plan`:
 about 40 sample points, one per ~5 km grid cell that holds a risk tile or that a
 trotro route passes through), and still
-fetches for itself when nothing is posted.
+fetches for itself when nothing is posted. Now and then a runner gets no connection
+to Open-Meteo for minutes on end while others get through, so it keeps trying for
+6 minutes, and a refresh that still fails is tried again 30 minutes later, on a new
+runner.
 
 The `202` only means a run started. Each run is recorded, and
 `GET /api/v1/internal/refresh` shows the latest: when it started and finished, how
