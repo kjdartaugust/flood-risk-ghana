@@ -180,7 +180,9 @@ out twice.
 After a refresh that saved rain, the run also tells
 [TroTro](https://github.com/kjdartaugust/trotro-optimizer), the trotro trip planner, which warns
 riders when a ride is expected to flood from a copy of `GET /routes`: asked while this backend is
-still awake, TroTro picks the new forecast up without a rider ever having to wake it.
+still awake, TroTro picks the new forecast up without a rider ever having to wake it. TroTro only
+fetches a new copy once its own is 175 minutes old, and a refresh can finish a few minutes before
+that (after one that took longer), so the run keeps asking for up to 10 minutes until TroTro has it.
 
 Between GitHub and the backend there are no secrets to set up — only the
 `BACKEND_URL` repository secret, so the workflow knows where to call:
