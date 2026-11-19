@@ -112,8 +112,11 @@ jobs:
     concurrency:
       group: refresh
       cancel-in-progress: false
+    outputs:
+      finished: ${{ steps.refresh.outputs.finished }} # when the refresh finished, for `tell`
     steps:
       - name: Trigger rainfall + alert refresh
+        id: refresh
         env:
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
@@ -185,6 +188,7 @@ jobs:
                 /tmp/run.json > /dev/null; then
               cat /tmp/run.json; echo
               if jq -e '.error == null and .rainfall_rows > 0' /tmp/run.json > /dev/null; then
+                echo "finished=$(jq -r .finished_at /tmp/run.json)" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
               echo "::error::refresh $run saved no rain: $(jq -r '.error // "0 rows"' /tmp/run.json)"
@@ -197,28 +201,49 @@ jobs:
   # Tell the trotro trip planner there's a new forecast, while the backend is
   # still awake to hand it over. TroTro (github.com/kjdartaugust/trotro-optimizer)
   # warns riders when a ride is expected to flood, from a copy of GET /routes that
-  # it keeps for just under 3 hours and fetches afresh the next time it's asked.
-  # Asked now, that fetch finds the backend awake. Asked later by a rider, it
-  # would have to wake it: about 100 s, and hours off Render's free allowance.
-  # It is only an ask. Nothing here can fail the run or hold up the chain, and a
-  # fork doesn't do it at all.
+  # it keeps for just under 3 hours (175 minutes) and fetches afresh the next time
+  # it's asked. Asked now, that fetch finds the backend awake. Asked later by a
+  # rider, it would have to wake it: about 100 s, and hours off Render's free
+  # allowance. It is only an ask. Nothing here can fail the run or hold up the
+  # chain (it gives up after about 10 minutes), and a fork doesn't do it at all.
   tell:
     needs: refresh
     if: needs.refresh.result == 'success' && github.repository == 'kjdartaugust/flood-risk-ghana'
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 12
     permissions: {}
     steps:
       - env:
           FEED: https://frontend-blush-five-v3pge1dl9r.vercel.app/api/flood
+          FINISHED: ${{ needs.refresh.outputs.finished }}
         run: |
-          # The first ask gets the kept copy and sets a fresh one going behind
-          # it; the second, a little later, shows what it got.
-          curl -sS -o /dev/null --max-time 30 "$FEED" || true
-          sleep 25
-          curl -sS --max-time 30 "$FEED" \
-            | jq -c '{read, checked, hours: (.hours | length), lines: (.lines | length)}' \
-            || echo "::notice::TroTro's copy of the forecast could not be read; it will catch up when a rider asks."
+          # An ask once TroTro's copy is 175 minutes old gets that copy and sets
+          # a fresh one going behind it; the next ask shows what it got. But
+          # each refresh is timed from when the last one started, so after one
+          # that took longer (6 minutes trying to reach Open-Meteo, say) the next
+          # can finish before TroTro's copy is that old. An ask then fetches
+          # nothing, and the old forecast stays until TroTro is asked again: on
+          # 18 Nov 2026 the 10:33 one stayed until 16:24, the next refresh. So
+          # ask every 30 seconds, for up to 10 minutes, until TroTro has this
+          # refresh's forecast (its `checked` is when the refresh it holds
+          # finished).
+          sec() { date -d "${1/.[0-9]*Z/Z}" +%s 2>/dev/null; } # whole seconds
+          if [ -z "$FINISHED" ] || ! want=$(sec "$FINISHED"); then
+            echo "No new forecast to tell TroTro about (${FINISHED:-none})."; exit 0
+          fi
+          stop=$(( $(date +%s) + 600 ))
+          while :; do
+            copy=$(curl -sS --max-time 30 "$FEED" \
+              | jq -c '{read, checked, hours: (.hours | length), lines: (.lines | length)}' 2>/dev/null) || copy=""
+            got=$(jq -r '.checked // empty' <<<"$copy" 2>/dev/null) || got=""
+            if [ -n "$got" ] && have=$(sec "$got") && [ "$have" -ge "$want" ]; then
+              echo "$copy"; exit 0
+            fi
+            [ "$(date +%s)" -lt "$stop" ] || break
+            sleep 30
+          done
+          if [ -n "$copy" ]; then echo "$copy"; else echo "TroTro's copy of the forecast could not be read."; fi
+          echo "::notice::TroTro doesn't have this forecast yet; it will pick it up later (when a rider asks, or after the next refresh)."
 
   # Start the next run, whatever happened here (a failed refresh mustn't break
   # the chain), unless another chain run is already alive: the backup schedule
